@@ -339,9 +339,9 @@ export const runRiskCheck = createServerFn({ method: "POST" })
     let modelId: string;
     try {
       const reply = await callModel(RISK_REVIEW_SYSTEM_PROMPT, buildRiskReviewInput(body), {
+        // Fast, low-effort: deterministic sampling. No reply-length cap, because
+        // reasoning-style models can spend a cap before writing any output.
         temperature: 0,
-        maxTokens: 1500,
-        timeoutMs: 20_000,
       });
       const items = parseJsonArray(reply.text);
       if (!items) throw new ModelCallError("Model reply was not a JSON array", reply.modelId, "invalid_output");
