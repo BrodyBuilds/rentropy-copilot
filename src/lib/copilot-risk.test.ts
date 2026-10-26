@@ -156,14 +156,14 @@ describe("deposit clock", () => {
 });
 
 describe("semantic span verification", () => {
-  const body = "Hi Sarah, pay now or we change the locks. Pay now.";
+  const body = "Hi Sarah. Pay now or we change the locks. Pay now.";
 
   it("keeps quotes that occur exactly once and rejects zero or multiple matches", () => {
     const items = [
       { quote: "we change the locks", category: "illegal_self_help", severity: "high", explanation: "Lockout.", suggestion: "we will follow the legal process" },
       { quote: "Pay now", category: "coercion", severity: "low", explanation: "x", suggestion: "y" },
       { quote: "we cut the water", category: "illegal_self_help", severity: "high", explanation: "x", suggestion: "y" },
-      { quote: "pay now", category: "not_a_category", severity: "high", explanation: "x" },
+      { quote: "Pay now", category: "not_a_category", severity: "high", explanation: "x" },
     ];
     const r = verifySemanticFlags(items, body);
     expect(r.flags.map((f) => f.quote)).toEqual(["we change the locks"]);
@@ -177,7 +177,7 @@ describe("semantic span verification", () => {
       body,
     ).flags;
     expect(flag && applySuggestion(flag, body, body)).toBe(
-      "Hi Sarah, pay now or we follow the legal process. Pay now.",
+      "Hi Sarah. Pay now or we follow the legal process. Pay now.",
     );
   });
 

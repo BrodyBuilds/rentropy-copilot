@@ -382,7 +382,7 @@ function isFeeAmount(
 
 const LATE_FEE_RE = /\blate[- ]?(?:fees?|charges?|penalt(?:y|ies))\b/gi;
 const STACK_RE =
-  /\b(?:additional|another|second|extra|further|daily|weekly|recurring|multiple)\b[^.!?\n]{0,30}\b(?:late[- ]?)?(?:fees?|charges?)\b|\b(?:fees?|charges?)\b[^.!?\n]{0,30}\b(?:per day|each day|every day|a day|daily|per week|each week|weekly|for each day)\b/i;
+  /\b(?:additional|another|second|extra|further|daily|weekly|recurring|multiple)\b(?:[^.!?\n]|\.(?=\d)){0,40}\b(?:late[- ]?)?(?:fees?|charges?)\b|\b(?:fees?|charges?)\b(?:[^.!?\n]|\.(?=\d)){0,40}\b(?:per day|each day|every day|a day|daily|per week|each week|weekly|for each day)\b/i;
 
 function checkLateFee(
   body: string,
