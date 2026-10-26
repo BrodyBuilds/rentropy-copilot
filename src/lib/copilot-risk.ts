@@ -268,7 +268,7 @@ function checkIdentity(body: string, tenant: TenantRecord, others: OtherTenant[]
 
   // Greeting must address the bound tenant.
   const greeting =
-    /^\s*(?:hi|hello|hey|dear|good\s+(?:morning|afternoon|evening))[ \t,]+((?:(?:mr|mrs|ms|mx|miss|dr)\.?[ \t]+)?\p{Lu}[\p{L}'’-]*(?:[ \t]+\p{Lu}[\p{L}'’-]*)*)/iu;
+    /^\s*(?:[Hh]i|[Hh]ello|[Hh]ey|[Dd]ear|[Gg]ood\s+(?:[Mm]orning|[Aa]fternoon|[Ee]vening))[ \t,]+((?:(?:Mr|Mrs|Ms|Mx|Miss|Dr)\.?[ \t]+)?\p{Lu}[\p{L}'’-]*(?:[ \t]+\p{Lu}[\p{L}'’-]*)*)/u;
   const g = greeting.exec(body);
   if (g?.[1]) {
     const nameText = g[1];
@@ -358,6 +358,28 @@ function intendedFigure(body: string, m: MoneyMention, tenant: TenantRecord): Le
   return null;
 }
 
+/** Whether an amount inside a late-fee sentence is the fee itself (vs. rent or balance). */
+function isFeeAmount(
+  body: string,
+  s: { start: number; end: number },
+  a: MoneyMention,
+  tenant: TenantRecord,
+): boolean {
+  const before = body.slice(Math.max(s.start, a.start - 30), a.start).toLowerCase();
+  const after = body.slice(a.end, Math.min(s.end, a.end + 20)).toLowerCase();
+  if (/^\s*(?:late[- ]?)?(?:fee|charge|penalt)/.test(after)) return true;
+  const feeAt = Math.max(before.lastIndexOf("fee"), before.lastIndexOf("charge"), before.lastIndexOf("penalt"));
+  if (feeAt !== -1) {
+    const tail = before.slice(feeAt);
+    if (!/\b(?:rent|balance|owe|owed|outstanding|unpaid)\b/.test(tail)) return true;
+  }
+  return (
+    a.cents === tenant.lease_late_fee_cents &&
+    a.cents !== tenant.rent_cents &&
+    a.cents !== tenant.balance_cents
+  );
+}
+
 const LATE_FEE_RE = /\blate[- ]?(?:fees?|charges?|penalt(?:y|ies))\b/gi;
 const STACK_RE =
   /\b(?:additional|another|second|extra|further|daily|weekly|recurring|multiple)\b[^.!?\n]{0,30}\b(?:late[- ]?)?(?:fees?|charges?)\b|\b(?:fees?|charges?)\b[^.!?\n]{0,30}\b(?:per day|each day|every day|a day|daily|per week|each week|weekly|for each day)\b/i;
@@ -382,7 +404,9 @@ function checkLateFee(
 
   const feeAmounts = new Set<number>();
   for (const s of sentences.values()) {
-    const amounts = money.filter((x) => x.start >= s.start && x.end <= s.end);
+    const amounts = money.filter(
+      (x) => x.start >= s.start && x.end <= s.end && isFeeAmount(body, s, x, tenant),
+    );
     for (const a of amounts) {
       handledMoney.add(a.start);
       feeAmounts.add(a.cents);
