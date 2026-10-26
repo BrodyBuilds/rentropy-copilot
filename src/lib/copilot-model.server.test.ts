@@ -54,4 +54,18 @@ describe("callModel", () => {
     const err = await callModel("sys", "user").catch((e: unknown) => e);
     expect((err as ModelCallError).code).toBe("http_401");
   });
+
+  it("sends temperature and max_tokens only when the caller asks for them", async () => {
+    setEnv({ META_MODEL_API_KEY: "test-key", META_MODEL_ID: "meta-test-model", META_MODEL_API_BASE_URL: "https://api.example.test/v1" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: "[]" } }] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callModel("sys", "user", { temperature: 0, maxTokens: 1500 });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    expect(body.temperature).toBe(0);
+    expect(body.max_tokens).toBe(1500);
+  });
 });
