@@ -40,7 +40,7 @@ function toBox(frame: number, segment: string): SegmentationBox | null {
     if (key && Number.isFinite(value) && !(key in named)) named[key] = value;
   }
 
-  let vals: { x1?: number; y1?: number; x2?: number; y2?: number; w?: number; h?: number; c?: number };
+  let vals: Partial<Record<"x1" | "y1" | "x2" | "y2" | "w" | "h" | "c", number | undefined>>;
   if (["x1", "y1", "x2", "y2", "w", "h"].every((k) => k in named)) {
     vals = named;
   } else {
