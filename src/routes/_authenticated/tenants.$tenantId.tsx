@@ -1,14 +1,31 @@
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Copy, ShieldCheck, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Copy, ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import {
+  CleanRun,
+  FlagCard,
+  HighlightedDraft,
+  NeutralNote,
+  WarningBanner,
+  allFlags,
+  layersThatRan,
+} from "@/components/risk-check";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { copilotDraft, decideDraft, getTenant, type DraftRow } from "@/lib/copilot.functions";
+import {
+  copilotDraft,
+  decideDraft,
+  getTenant,
+  runRiskCheck,
+  RISK_CHECK_FAILED_MESSAGE,
+  type DraftRow,
+} from "@/lib/copilot.functions";
+import { applySuggestion, CHECK_LABELS, type RiskFlag, type RiskResult } from "@/lib/copilot-risk";
 import {
   MESSAGE_TYPES,
   TONES,
@@ -56,6 +73,7 @@ function ComposePage() {
   const { data: tenant } = useSuspenseQuery(tenantQuery(tenantId));
   const generate = useServerFn(copilotDraft);
   const decide = useServerFn(decideDraft);
+  const riskCheck = useServerFn(runRiskCheck);
 
   const [messageType, setMessageType] = useState<MessageType>("late_rent");
   const [tone, setTone] = useState<Tone>("firm_but_fair");
@@ -65,6 +83,11 @@ function ComposePage() {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [body, setBody] = useState("");
   const [deciding, setDeciding] = useState<"approve" | "discard" | null>(null);
+  const [risk, setRisk] = useState<RiskResult | null>(null);
+  const [riskError, setRiskError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [confirmHigh, setConfirmHigh] = useState(false);
 
   if (!tenant) return null;
 
@@ -82,6 +105,7 @@ function ComposePage() {
       setDraft(result.draft);
       setFacts(result.facts);
       setBody(result.draft.draft_body);
+      resetRisk();
     } catch (e) {
       console.error(e);
       setError("Something went wrong. Please try again.");
@@ -90,8 +114,57 @@ function ComposePage() {
     }
   }
 
+  function resetRisk() {
+    setRisk(null);
+    setRiskError(null);
+    setAppliedIds(new Set());
+    setConfirmHigh(false);
+  }
+
+  function updateBody(next: string) {
+    setBody(next);
+    setConfirmHigh(false);
+  }
+
+  async function runRisk() {
+    if (!draft) return;
+    setChecking(true);
+    setConfirmHigh(false);
+    try {
+      const res = await riskCheck({ data: { draft_id: draft.id, draft_body: body } });
+      if (!res.ok) {
+        setRisk(null);
+        setRiskError(res.error);
+        setDraft({ ...draft, risk_flags: null, risk_checked_at: null });
+        return;
+      }
+      setRisk(res.result);
+      setRiskError(null);
+      setAppliedIds(new Set());
+      setDraft({ ...draft, risk_checked_at: res.riskCheckedAt });
+    } catch (e) {
+      console.error(e);
+      setRisk(null);
+      setRiskError(RISK_CHECK_FAILED_MESSAGE);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function applyFlag(flag: RiskFlag) {
+    if (!risk) return;
+    const next = applySuggestion(flag, body, risk.checked_body);
+    if (next === null) return;
+    updateBody(next);
+    setAppliedIds((prev) => new Set(prev).add(flag.id));
+  }
+
   async function runDecision(decision: "approve" | "discard") {
     if (!draft) return;
+    if (decision === "approve" && highCount > 0 && !confirmHigh) {
+      setConfirmHigh(true);
+      return;
+    }
     setDeciding(decision);
     try {
       const updated = await decide({
@@ -103,6 +176,7 @@ function ComposePage() {
       });
       setDraft(updated);
       setBody(updated.draft_body);
+      setConfirmHigh(false);
       toast.success(decision === "approve" ? "Draft approved" : "Draft discarded");
     } catch (e) {
       console.error(e);
@@ -117,6 +191,7 @@ function ComposePage() {
     setFacts([]);
     setBody("");
     setError(null);
+    resetRisk();
   }
 
   async function copyDraft() {
@@ -125,6 +200,13 @@ function ComposePage() {
   }
 
   const isPending = draft?.status === "pending";
+  const flags = risk ? allFlags(risk) : [];
+  const highCount = flags.filter((f) => f.severity === "high").length;
+  const stale = risk !== null && body !== risk.checked_body;
+  const neverChecked = !risk && !riskError && !draft?.risk_checked_at;
+  const notDeterminableLayers = risk
+    ? risk.layers.filter((l) => l.status === "not_determinable").map((l) => CHECK_LABELS[l.check])
+    : [];
 
   return (
     <div>
@@ -197,7 +279,7 @@ function ComposePage() {
             </div>
             <Textarea
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => updateBody(e.target.value)}
               readOnly={!isPending}
               rows={12}
               className="mt-4 resize-y bg-background leading-relaxed"
@@ -209,17 +291,28 @@ function ComposePage() {
                 <>
                   <Button
                     onClick={() => runDecision("approve")}
-                    disabled={deciding !== null || body.trim() === ""}
+                    disabled={deciding !== null || checking || body.trim() === ""}
                   >
-                    {deciding === "approve" ? "Approving…" : "Approve"}
+                    {deciding === "approve"
+                      ? "Approving…"
+                      : confirmHigh
+                        ? "Approve anyway"
+                        : "Approve"}
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => runDecision("discard")}
-                    disabled={deciding !== null}
+                    disabled={deciding !== null || checking}
                   >
                     {deciding === "discard" ? "Discarding…" : "Discard"}
                   </Button>
+                  <RiskStatus
+                    neverChecked={neverChecked}
+                    failed={riskError !== null}
+                    stale={stale}
+                    flagCount={flags.length}
+                    highCount={highCount}
+                  />
                 </>
               )}
               {draft.status === "approved" && (
@@ -234,13 +327,83 @@ function ComposePage() {
               )}
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-3 rounded-md border border-dashed border-border px-4 py-3">
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ShieldCheck className="h-4 w-4" /> Risk check — coming in slice 2
-              </span>
-              <Button size="sm" variant="outline" disabled>
-                Run risk check
-              </Button>
+            {isPending && confirmHigh && (
+              <p className="mt-3 flex items-center gap-2 text-sm text-destructive" role="alert">
+                <AlertTriangle className="h-4 w-4" />
+                {highCount} high-severity flag{highCount === 1 ? " is" : "s are"} showing. Click
+                “Approve anyway” to approve — the decision is yours.
+              </p>
+            )}
+
+            <div className="mt-5 rounded-md border border-border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <ShieldCheck className="h-4 w-4" /> Risk check
+                </h3>
+                {isPending && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={runRisk}
+                    disabled={checking || deciding !== null || body.trim() === ""}
+                  >
+                    {checking ? "Checking…" : risk ? "Run risk check again" : "Run risk check"}
+                  </Button>
+                )}
+              </div>
+
+              <div className="mt-3 space-y-3">
+                {riskError && <WarningBanner>{riskError}</WarningBanner>}
+                {neverChecked && (
+                  <p className="text-sm text-muted-foreground">
+                    Risk check has not run. It only runs when you click “Run risk check”.
+                  </p>
+                )}
+                {risk && (
+                  <>
+                    {stale && (
+                      <WarningBanner>
+                        Draft changed since the check — run the risk check again
+                      </WarningBanner>
+                    )}
+                    {flags.length === 0 ? (
+                      <CleanRun result={risk} />
+                    ) : (
+                      <>
+                        <HighlightedDraft body={body} result={risk} flags={flags} />
+                        <ol className="space-y-3">
+                          {flags.map((f, i) => (
+                            <FlagCard
+                              key={f.id}
+                              flag={f}
+                              n={i + 1}
+                              body={body}
+                              result={risk}
+                              canApply={isPending}
+                              applied={appliedIds.has(f.id)}
+                              onApply={() => applyFlag(f)}
+                            />
+                          ))}
+                        </ol>
+                      </>
+                    )}
+                    {risk.not_determinable.map((nd) => (
+                      <NeutralNote key={nd.check} title={nd.title} detail={nd.detail} />
+                    ))}
+                    {risk.info.map((info) => (
+                      <NeutralNote key={info.check} title={info.title} detail={info.detail} />
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      Checks that ran: {layersThatRan(risk).join(", ")}.
+                      {notDeterminableLayers.length > 0 &&
+                        ` Not determinable: ${notDeterminableLayers.join(", ")}.`}
+                      {risk.rejected_quote_count > 0 &&
+                        ` ${risk.rejected_quote_count} AI flag${risk.rejected_quote_count === 1 ? " was" : "s were"} dropped because the quoted text didn't match the draft exactly once.`}
+                      {" "}The check informs; you decide.
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
@@ -264,6 +427,49 @@ function ComposePage() {
         </section>
       )}
     </div>
+  );
+}
+
+function RiskStatus({
+  neverChecked,
+  failed,
+  stale,
+  flagCount,
+  highCount,
+}: {
+  neverChecked: boolean;
+  failed: boolean;
+  stale: boolean;
+  flagCount: number;
+  highCount: number;
+}) {
+  let text: string;
+  let tone: "muted" | "warn" | "bad" = "muted";
+  if (failed) {
+    text = "Risk check couldn't run — review carefully";
+    tone = "warn";
+  } else if (neverChecked) {
+    text = "Risk check has not run";
+  } else if (stale) {
+    text = "Draft changed since the check";
+    tone = "warn";
+  } else if (flagCount === 0) {
+    text = "No flags from the checks that ran";
+  } else {
+    text = `${flagCount} flag${flagCount === 1 ? "" : "s"}${highCount ? ` · ${highCount} high` : ""}`;
+    tone = highCount ? "bad" : "warn";
+  }
+  return (
+    <span
+      className={cn(
+        "ml-1 text-xs",
+        tone === "muted" && "text-muted-foreground",
+        tone === "warn" && "font-medium text-warning-foreground",
+        tone === "bad" && "font-medium text-destructive",
+      )}
+    >
+      {text}
+    </span>
   );
 }
 
