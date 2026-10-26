@@ -314,7 +314,7 @@ function PhotoWithRegions({ url, regions }: { url: string; regions: TriageRegion
             height: pct(r.y2 - r.y1, r.h),
           }}
         >
-          <span className="absolute left-0 top-0 -translate-y-full rounded-sm bg-primary px-1.5 py-0.5 text-[11px] font-medium leading-none text-primary-foreground">
+          <span className="absolute left-0 top-0 rounded-br-sm bg-primary px-1.5 py-0.5 text-[11px] font-medium leading-none text-primary-foreground">
             {r.n}
           </span>
         </div>

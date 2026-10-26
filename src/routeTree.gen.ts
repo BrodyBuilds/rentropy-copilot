@@ -14,6 +14,8 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedAuditRouteImport } from './routes/_authenticated/audit'
 import { Route as AuthenticatedTenantsIndexRouteImport } from './routes/_authenticated/tenants.index'
 import { Route as AuthenticatedTenantsTenantIdRouteImport } from './routes/_authenticated/tenants.$tenantId'
+import { Route as AuthenticatedTriageIndexRouteImport } from './routes/_authenticated/triage.index'
+import { Route as AuthenticatedTriageTriageIdRouteImport } from './routes/_authenticated/triage.$triageId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -41,18 +43,34 @@ const AuthenticatedTenantsTenantIdRoute =
     path: '/tenants/$tenantId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedTriageIndexRoute =
+  AuthenticatedTriageIndexRouteImport.update({
+    id: '/triage/',
+    path: '/triage/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedTriageTriageIdRoute =
+  AuthenticatedTriageTriageIdRouteImport.update({
+    id: '/triage/$triageId',
+    path: '/triage/$triageId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/tenants/$tenantId': typeof AuthenticatedTenantsTenantIdRoute
+  '/triage/$triageId': typeof AuthenticatedTriageTriageIdRoute
   '/tenants/': typeof AuthenticatedTenantsIndexRoute
+  '/triage/': typeof AuthenticatedTriageIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/audit': typeof AuthenticatedAuditRoute
   '/tenants/$tenantId': typeof AuthenticatedTenantsTenantIdRoute
+  '/triage/$triageId': typeof AuthenticatedTriageTriageIdRoute
   '/tenants': typeof AuthenticatedTenantsIndexRoute
+  '/triage': typeof AuthenticatedTriageIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -60,20 +78,36 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/_authenticated/audit': typeof AuthenticatedAuditRoute
   '/_authenticated/tenants/$tenantId': typeof AuthenticatedTenantsTenantIdRoute
+  '/_authenticated/triage/$triageId': typeof AuthenticatedTriageTriageIdRoute
   '/_authenticated/tenants/': typeof AuthenticatedTenantsIndexRoute
+  '/_authenticated/triage/': typeof AuthenticatedTriageIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/audit' | '/tenants/$tenantId' | '/tenants/'
+  fullPaths:
+    | '/'
+    | '/audit'
+    | '/tenants/$tenantId'
+    | '/triage/$triageId'
+    | '/tenants/'
+    | '/triage/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/audit' | '/tenants/$tenantId' | '/tenants'
+  to:
+    | '/'
+    | '/audit'
+    | '/tenants/$tenantId'
+    | '/triage/$triageId'
+    | '/tenants'
+    | '/triage'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/_authenticated/audit'
     | '/_authenticated/tenants/$tenantId'
+    | '/_authenticated/triage/$triageId'
     | '/_authenticated/tenants/'
+    | '/_authenticated/triage/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -118,19 +152,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTenantsTenantIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/triage/': {
+      id: '/_authenticated/triage/'
+      path: '/triage'
+      fullPath: '/triage/'
+      preLoaderRoute: typeof AuthenticatedTriageIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/triage/$triageId': {
+      id: '/_authenticated/triage/$triageId'
+      path: '/triage/$triageId'
+      fullPath: '/triage/$triageId'
+      preLoaderRoute: typeof AuthenticatedTriageTriageIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAuditRoute: typeof AuthenticatedAuditRoute
   AuthenticatedTenantsTenantIdRoute: typeof AuthenticatedTenantsTenantIdRoute
+  AuthenticatedTriageTriageIdRoute: typeof AuthenticatedTriageTriageIdRoute
   AuthenticatedTenantsIndexRoute: typeof AuthenticatedTenantsIndexRoute
+  AuthenticatedTriageIndexRoute: typeof AuthenticatedTriageIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAuditRoute: AuthenticatedAuditRoute,
   AuthenticatedTenantsTenantIdRoute: AuthenticatedTenantsTenantIdRoute,
+  AuthenticatedTriageTriageIdRoute: AuthenticatedTriageTriageIdRoute,
   AuthenticatedTenantsIndexRoute: AuthenticatedTenantsIndexRoute,
+  AuthenticatedTriageIndexRoute: AuthenticatedTriageIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
