@@ -96,7 +96,7 @@ export const listTenants = createServerFn({ method: "GET" })
 
 export const getTenant = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ tenantId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ tenantId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { data: tenant, error } = await context.supabase
       .from("demo_tenants")
@@ -134,7 +134,7 @@ export type CopilotDraftResult =
 
 export const copilotDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         tenant_id: z.string().uuid(),
@@ -209,7 +209,7 @@ export const copilotDraft = createServerFn({ method: "POST" })
 
 export const decideDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         draft_id: z.string().uuid(),
