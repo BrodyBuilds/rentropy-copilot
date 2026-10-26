@@ -63,9 +63,19 @@ export function extractReplyText(body: unknown): string {
   return partsToText(b.completion_message?.content).trim();
 }
 
+export type CallModelOptions = {
+  /** Sampling temperature; omitted from the request when unset. */
+  temperature?: number;
+  /** Upper bound on reply length; omitted from the request when unset. */
+  maxTokens?: number;
+  /** Request timeout; defaults to 30s. */
+  timeoutMs?: number;
+};
+
 export async function callModel(
   systemPrompt: string,
   userPrompt: string,
+  options: CallModelOptions = {},
 ): Promise<{ text: string; modelId: string }> {
   const apiKey = readEnv("META_MODEL_API_KEY");
   const modelId = readEnv("META_MODEL_ID");
@@ -96,8 +106,10 @@ export async function callModel(
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
@@ -119,6 +131,6 @@ export async function callModel(
   }
 
   const text = extractReplyText(body);
-  if (!text) throw new ModelCallError("Model returned an empty draft", modelId, "empty_output");
+  if (!text) throw new ModelCallError("Model returned an empty reply", modelId, "empty_output");
   return { text, modelId };
 }
