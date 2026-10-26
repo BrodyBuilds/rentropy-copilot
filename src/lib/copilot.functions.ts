@@ -135,7 +135,20 @@ export const listAudit = createServerFn({ method: "GET" })
     }));
   });
 
-/* ---------- copilot_draft: the only place a model is called ---------- */
+export const getDraft = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => z.object({ draftId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { data: draft, error } = await context.supabase
+      .from("copilot_drafts")
+      .select("*")
+      .eq("id", data.draftId)
+      .maybeSingle();
+    if (error) throw new Error("Could not load draft");
+    return draft satisfies DraftRow | null;
+  });
+
+/* ---------- copilot_draft ---------- */
 
 export type CopilotDraftResult =
   | { ok: true; draft: DraftRow; facts: Fact[]; modelId: string }
@@ -421,7 +434,20 @@ export const runRiskCheck = createServerFn({ method: "POST" })
 function auditSummary(action: string, detail: Json | null): string | null {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
   const d = detail as Record<string, Json | undefined>;
-  if (action === "model_error") return d["stage"] === "risk_check" ? "During risk check" : "During drafting";
+  if (action === "model_error") {
+    if (d["stage"] === "risk_check") return "During risk check";
+    if (d["stage"] === "photo_triage") return "During photo triage";
+    return "During drafting";
+  }
+  if (action === "approve" && d["kind"] === "work_order") return "Work order";
+  if (action === "photo_triage") {
+    const regions = Number(d["regions"] ?? 0);
+    const found = Number(d["visible_findings"] ?? 0);
+    if (d["outcome"] === "needs_clearer_photo") {
+      return `${regions} region${regions === 1 ? "" : "s"} · asked for a clearer photo`;
+    }
+    return `${regions} region${regions === 1 ? "" : "s"} · ${found} visible finding${found === 1 ? "" : "s"}`;
+  }
   if (action === "risk_check") {
     const det = Number(d["deterministic_flags"] ?? 0);
     const sem = Number(d["semantic_flags"] ?? 0);

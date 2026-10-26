@@ -32,6 +32,7 @@ const ACTION_LABELS: Record<string, string> = {
   approve: "Approved",
   discard: "Discarded",
   risk_check: "Risk check",
+  photo_triage: "Photo triage",
 };
 
 function AuditPage() {

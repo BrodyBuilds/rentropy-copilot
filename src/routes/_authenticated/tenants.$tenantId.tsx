@@ -1,8 +1,8 @@
-import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, ArrowLeft, Copy, ShieldCheck, Sparkles } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import {
   copilotDraft,
   decideDraft,
+  getDraft,
   getTenant,
   runRiskCheck,
   RISK_CHECK_FAILED_MESSAGE,
@@ -29,6 +30,7 @@ import { applySuggestion, CHECK_LABELS, type RiskFlag, type RiskResult } from "@
 import {
   MESSAGE_TYPES,
   TONES,
+  buildFacts,
   formatCents,
   formatDate,
   type Fact,
@@ -43,6 +45,9 @@ const tenantQuery = (tenantId: string) =>
   });
 
 export const Route = createFileRoute("/_authenticated/tenants/$tenantId")({
+  // Optional: open an existing draft (e.g. the tenant reply a photo triage created).
+  validateSearch: (search: Record<string, unknown>): { draft?: string } =>
+    typeof search["draft"] === "string" ? { draft: search["draft"] } : {},
   head: () => ({
     meta: [
       { title: "Draft a message — Rentropy Copilot" },
@@ -88,6 +93,31 @@ function ComposePage() {
   const [checking, setChecking] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [confirmHigh, setConfirmHigh] = useState(false);
+
+  const { draft: draftParam } = Route.useSearch();
+  const linkedDraft = useQuery({
+    queryKey: ["draft", draftParam],
+    queryFn: () => getDraft({ data: { draftId: draftParam ?? "" } }),
+    enabled: !!draftParam,
+  });
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  useEffect(() => {
+    const d = linkedDraft.data;
+    if (!tenant || !d || d.tenant_id !== tenant.id || seededFor === d.id) return;
+    setSeededFor(d.id);
+    const type = MESSAGE_TYPES.find((m) => m.value === d.message_type)?.value;
+    const savedTone = TONES.find((t) => t.value === d.tone)?.value;
+    if (type) setMessageType(type);
+    if (savedTone) setTone(savedTone);
+    setDraft(d);
+    setBody(d.draft_body);
+    setFacts(type ? buildFacts(tenant, type) : []);
+    const stored = d.risk_flags as unknown as RiskResult | null;
+    setRisk(stored && stored.version === 1 && d.risk_checked_at ? stored : null);
+    setRiskError(null);
+    setAppliedIds(new Set());
+    setConfirmHigh(false);
+  }, [linkedDraft.data, tenant, seededFor]);
 
   if (!tenant) return null;
 

@@ -109,6 +109,47 @@ export type Database = {
           },
         ]
       }
+      copilot_photo_triage: {
+        Row: {
+          concept_prompt: string
+          created_at: string
+          findings: Json | null
+          id: string
+          photo_path: string
+          segmentation: Json | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          concept_prompt: string
+          created_at?: string
+          findings?: Json | null
+          id?: string
+          photo_path: string
+          segmentation?: Json | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          concept_prompt?: string
+          created_at?: string
+          findings?: Json | null
+          id?: string
+          photo_path?: string
+          segmentation?: Json | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copilot_photo_triage_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "demo_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       demo_tenants: {
         Row: {
           balance_cents: number

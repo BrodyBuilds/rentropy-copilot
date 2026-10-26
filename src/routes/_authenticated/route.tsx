@@ -36,6 +36,9 @@ function AuthenticatedLayout() {
             <Link to="/tenants" className={linkClass} activeProps={{ className: activeClass }}>
               Tenants
             </Link>
+            <Link to="/triage" className={linkClass} activeProps={{ className: activeClass }}>
+              Photo triage
+            </Link>
             <Link to="/audit" className={linkClass} activeProps={{ className: activeClass }}>
               Audit log
             </Link>
