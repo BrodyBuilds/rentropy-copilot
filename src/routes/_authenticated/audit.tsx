@@ -12,11 +12,11 @@ export const Route = createFileRoute("/_authenticated/audit")({
   head: () => ({
     meta: [
       { title: "Audit log — Rentropy Copilot" },
-      { name: "description", content: "Every draft generated, approved, discarded, or failed." },
+      { name: "description", content: "Every draft generated, risk-checked, approved, discarded, or failed." },
       { property: "og:title", content: "Audit log — Rentropy Copilot" },
       {
         property: "og:description",
-        content: "Every draft generated, approved, discarded, or failed.",
+        content: "Every draft generated, risk-checked, approved, discarded, or failed.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -31,6 +31,7 @@ const ACTION_LABELS: Record<string, string> = {
   model_error: "Model error",
   approve: "Approved",
   discard: "Discarded",
+  risk_check: "Risk check",
 };
 
 function AuditPage() {
@@ -73,6 +74,9 @@ function AuditPage() {
                   >
                     {ACTION_LABELS[r.action] ?? r.action}
                   </span>
+                  {r.detail && (
+                    <span className="block text-xs text-muted-foreground">{r.detail}</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                   {r.model_id ?? "—"}
