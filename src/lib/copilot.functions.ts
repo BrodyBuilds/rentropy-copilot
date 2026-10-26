@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
 import { buildDraftInput, COPILOT_SYSTEM_RULES } from "./copilot-draft.server";
-import { callModel, ModelCallError } from "./copilot-model.server";
+import { callModel, configuredModelId, ModelCallError } from "./copilot-model.server";
 import {
   buildFacts,
   MESSAGE_TYPE_VALUES,
@@ -160,9 +160,9 @@ export const copilotDraft = createServerFn({ method: "POST" })
 
     let result: { text: string; modelId: string };
     try {
-      result = await callModel({ instructions: COPILOT_SYSTEM_RULES, input });
+      result = await callModel(COPILOT_SYSTEM_RULES, input);
     } catch (error) {
-      const modelId = error instanceof ModelCallError ? error.modelId : null;
+      const modelId = error instanceof ModelCallError ? error.modelId : configuredModelId();
       const code = error instanceof ModelCallError ? error.code : "unknown";
       await supabase.from("copilot_audit_log").insert({
         tenant_id: tenant.id,

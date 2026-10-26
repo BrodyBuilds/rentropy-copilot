@@ -1,24 +1,15 @@
 // Single model adapter for Rentropy Copilot. Every model call in the app goes
-// through callModel(), so the model or provider can be swapped here alone.
-// The model ID comes from COPILOT_DRAFT_MODEL; the gateway SDK reads its API
-// key (LOVABLE_API_KEY) from the server environment. No key lives in code.
-import { generateResponse, GatewayError, type ResponsesRequest } from "@lovable.dev/ai-gateway";
-
-type DraftModel = ResponsesRequest["model"];
-
-const DEFAULT_DRAFT_MODEL: DraftModel = "openai/gpt-6-astra";
-
-const SUPPORTED_DRAFT_MODELS: readonly DraftModel[] = [
-  "openai/gpt-6-astra",
-  "openai/gpt-5.5",
-  "openai/gpt-5.4",
-  "openai/gpt-5.4-mini",
-];
+// through callModel(), so the model, provider, or endpoint is swapped here alone
+// by changing environment variables. Nothing about the model is hardcoded:
+//   META_MODEL_API_KEY       – sent as a Bearer token (server-only, never in the browser)
+//   META_MODEL_ID            – the model name sent in the request and recorded in the audit log
+//   META_MODEL_API_BASE_URL  – the chat-completions API base URL
+// This file is *.server.ts, so it can never be bundled into the client.
 
 export class ModelCallError extends Error {
   constructor(
     message: string,
-    readonly modelId: string,
+    readonly modelId: string | null,
     readonly code: string,
   ) {
     super(message);
@@ -26,46 +17,108 @@ export class ModelCallError extends Error {
   }
 }
 
-export function resolveDraftModelId(): DraftModel {
-  const configured = process.env["COPILOT_DRAFT_MODEL"]?.trim();
-  if (!configured) return DEFAULT_DRAFT_MODEL;
-  const match = SUPPORTED_DRAFT_MODELS.find((m) => m === configured);
-  if (!match) {
-    throw new ModelCallError(
-      `Unsupported COPILOT_DRAFT_MODEL "${configured}"`,
-      configured,
-      "unsupported_model",
-    );
-  }
-  return match;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+function readEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
 }
 
-export async function callModel(args: {
-  instructions: string;
-  input: string;
-}): Promise<{ text: string; modelId: string }> {
-  const modelId = resolveDraftModelId();
-  try {
-    const response = await generateResponse({
-      model: modelId,
-      instructions: args.instructions,
-      input: args.input,
-      reasoning: { effort: "low" },
-    });
-    const text = response.output
-      .flatMap((item) => (item.type === "message" ? item.content : []))
-      .map((part) => (part.type === "output_text" ? part.text : ""))
-      .join("")
-      .trim();
-    if (!text) throw new ModelCallError("Model returned an empty draft", modelId, "empty_output");
-    return { text, modelId };
-  } catch (error) {
-    if (error instanceof ModelCallError) throw error;
-    if (error instanceof GatewayError) {
-      console.error("[copilot] model call failed", error.code, error.ids);
-      throw new ModelCallError(error.message, modelId, String(error.code));
-    }
-    console.error("[copilot] model call failed", error);
-    throw new ModelCallError("Model call failed", modelId, "unknown");
+/** The configured model ID, or null when unset. Used for audit rows. */
+export function configuredModelId(): string | null {
+  return readEnv("META_MODEL_ID");
+}
+
+/** Accepts either an API base (".../v1") or the full chat-completions URL. */
+export function chatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  return trimmed.endsWith("/chat/completions") ? trimmed : `${trimmed}/chat/completions`;
+}
+
+type ContentPart = { type?: string; text?: string };
+
+function partsToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p: ContentPart) => (typeof p?.text === "string" ? p.text : ""))
+      .join("");
   }
+  if (content && typeof content === "object" && "text" in content) {
+    const text = (content as ContentPart).text;
+    return typeof text === "string" ? text : "";
+  }
+  return "";
+}
+
+/** Reads the reply from a standard chat-completions response (or Meta's native shape). */
+export function extractReplyText(body: unknown): string {
+  if (!body || typeof body !== "object") return "";
+  const b = body as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+    completion_message?: { content?: unknown };
+  };
+  const fromChoices = partsToText(b.choices?.[0]?.message?.content);
+  if (fromChoices) return fromChoices.trim();
+  return partsToText(b.completion_message?.content).trim();
+}
+
+export async function callModel(
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<{ text: string; modelId: string }> {
+  const apiKey = readEnv("META_MODEL_API_KEY");
+  const modelId = readEnv("META_MODEL_ID");
+  const baseUrl = readEnv("META_MODEL_API_BASE_URL");
+
+  if (!apiKey || !modelId || !baseUrl) {
+    const missing = [
+      !apiKey && "META_MODEL_API_KEY",
+      !modelId && "META_MODEL_ID",
+      !baseUrl && "META_MODEL_API_BASE_URL",
+    ].filter(Boolean);
+    console.error("[copilot] model not configured; missing:", missing.join(", "));
+    throw new ModelCallError("Model is not configured", modelId, "not_configured");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(chatCompletionsUrl(baseUrl), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    console.error("[copilot] model request failed", timedOut ? "timeout" : error);
+    throw new ModelCallError("Model request failed", modelId, timedOut ? "timeout" : "network");
+  }
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("[copilot] model API error", response.status, detail.slice(0, 500));
+    throw new ModelCallError(`Model API returned ${response.status}`, modelId, `http_${response.status}`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ModelCallError("Model API returned invalid JSON", modelId, "invalid_response");
+  }
+
+  const text = extractReplyText(body);
+  if (!text) throw new ModelCallError("Model returned an empty draft", modelId, "empty_output");
+  return { text, modelId };
 }
