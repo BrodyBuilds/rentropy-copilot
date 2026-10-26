@@ -82,7 +82,7 @@ function ordinal(n: number): string {
 
 /** Formats a YYYY-MM-DD date without timezone drift. */
 export function formatDate(isoDate: string): string {
-  const [y, m, d] = isoDate.split("-").map(Number);
+  const [y = 1970, m = 1, d = 1] = isoDate.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",

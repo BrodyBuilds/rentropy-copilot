@@ -39,14 +39,14 @@ describe("Facts used", () => {
 
   it("late rent for Sarah uses rent, due day, balance and late fee from her record", () => {
     const facts = byField(buildFacts(sarah, "late_rent"));
-    expect(facts.rent_cents).toBe("$2,450.00");
-    expect(facts.due_day).toBe("1st of each month");
-    expect(facts.balance_cents).toBe("$2,450.00");
-    expect(facts.lease_late_fee_cents).toBe("$122.50");
+    expect(facts['rent_cents']).toBe("$2,450.00");
+    expect(facts['due_day']).toBe("1st of each month");
+    expect(facts['balance_cents']).toBe("$2,450.00");
+    expect(facts['lease_late_fee_cents']).toBe("$122.50");
   });
 
   it("deposit reply for James reports the disputed deposit", () => {
-    expect(byField(buildFacts(james, "deposit_reply")).deposit_status).toBe("disputed");
+    expect(byField(buildFacts(james, "deposit_reply"))['deposit_status']).toBe("disputed");
   });
 
   it("never shows a fact that has no value in the record", () => {
