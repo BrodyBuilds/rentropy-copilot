@@ -402,14 +402,12 @@ function checkLateFee(
     sentences.set(s.start, s);
   }
 
-  const feeAmounts = new Set<number>();
   for (const s of sentences.values()) {
     const amounts = money.filter(
       (x) => x.start >= s.start && x.end <= s.end && isFeeAmount(body, s, x, tenant),
     );
     for (const a of amounts) {
       handledMoney.add(a.start);
-      feeAmounts.add(a.cents);
       if (a.cents !== lease) {
         flags.push({
           body,
@@ -474,23 +472,6 @@ function checkLateFee(
         start,
         end: start + stack[0].length,
         explanation: `NC allows one late fee per late payment. This wording suggests more than one fee or a recurring fee.`,
-        expected: formatCents(lease),
-        suggestion: null,
-      });
-    }
-  }
-
-  if (feeAmounts.size > 1) {
-    const first = [...sentences.values()][0];
-    if (first && !flags.some((f) => f.category === "late_fee_stacking")) {
-      flags.push({
-        body,
-        check: "late_fee",
-        category: "late_fee_stacking",
-        severity: "high",
-        start: first.start,
-        end: first.end,
-        explanation: `The draft mentions more than one late-fee amount. NC allows one late fee per late payment (${formatCents(lease)} on this lease).`,
         expected: formatCents(lease),
         suggestion: null,
       });
