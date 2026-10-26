@@ -14,13 +14,155 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      copilot_audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          detail: Json | null
+          draft_id: string | null
+          id: string
+          model_id: string | null
+          tenant_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          detail?: Json | null
+          draft_id?: string | null
+          id?: string
+          model_id?: string | null
+          tenant_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          detail?: Json | null
+          draft_id?: string | null
+          id?: string
+          model_id?: string | null
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copilot_audit_log_draft_id_fkey"
+            columns: ["draft_id"]
+            isOneToOne: false
+            referencedRelation: "copilot_drafts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "copilot_audit_log_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "demo_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      copilot_drafts: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          draft_body: string
+          id: string
+          message_type: string
+          risk_checked_at: string | null
+          risk_flags: Json | null
+          status: string
+          tenant_id: string
+          tone: string
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          draft_body: string
+          id?: string
+          message_type: string
+          risk_checked_at?: string | null
+          risk_flags?: Json | null
+          status?: string
+          tenant_id: string
+          tone: string
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          draft_body?: string
+          id?: string
+          message_type?: string
+          risk_checked_at?: string | null
+          risk_flags?: Json | null
+          status?: string
+          tenant_id?: string
+          tone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "copilot_drafts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "demo_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      demo_tenants: {
+        Row: {
+          balance_cents: number
+          created_at: string
+          deposit_status: string
+          due_day: number
+          full_name: string
+          id: string
+          lease_end: string
+          lease_late_fee_cents: number
+          lease_start: string
+          possession_date: string | null
+          property_label: string
+          rent_cents: number
+          termination_date: string | null
+        }
+        Insert: {
+          balance_cents?: number
+          created_at?: string
+          deposit_status: string
+          due_day: number
+          full_name: string
+          id?: string
+          lease_end: string
+          lease_late_fee_cents?: number
+          lease_start: string
+          possession_date?: string | null
+          property_label: string
+          rent_cents: number
+          termination_date?: string | null
+        }
+        Update: {
+          balance_cents?: number
+          created_at?: string
+          deposit_status?: string
+          due_day?: number
+          full_name?: string
+          id?: string
+          lease_end?: string
+          lease_late_fee_cents?: number
+          lease_start?: string
+          possession_date?: string | null
+          property_label?: string
+          rent_cents?: number
+          termination_date?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_demo_user: { Args: never; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
