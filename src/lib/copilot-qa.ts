@@ -57,9 +57,8 @@ export type QaPlan =
 function ordinal(n: number): string {
   const mod100 = n % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
-  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`.replace(/(\d)(st|nd|rd)$/, (m, d: string, s: string) =>
-    ["1", "2", "3"].includes(d) ? m : `${d}th`,
-  ).replace(/^(\d*[04-9])(st|nd|rd)$/, "$1th");
+  const suffix = n % 10 === 1 ? "st" : n % 10 === 2 ? "nd" : n % 10 === 3 ? "rd" : "th";
+  return `${n}${suffix}`;
 }
 
 export function qaFact(t: TenantRecord, field: TenantField): QaFact | null {
