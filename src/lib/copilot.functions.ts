@@ -434,6 +434,8 @@ export const runRiskCheck = createServerFn({ method: "POST" })
 function auditSummary(action: string, detail: Json | null): string | null {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return null;
   const d = detail as Record<string, Json | undefined>;
+  // Rows may carry their own one-line summary (used by self-contained features).
+  if (typeof d["summary"] === "string") return d["summary"];
   if (action === "model_error") {
     if (d["stage"] === "risk_check") return "During risk check";
     if (d["stage"] === "photo_triage") return "During photo triage";
