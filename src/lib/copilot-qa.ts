@@ -435,7 +435,7 @@ export function buildQaInput(question: string, facts: QaFact[]): string {
   return `${JSON.stringify(payload, null, 2)}\n\nAnswer the question using only tenant_facts.`;
 }
 
-type DateParts = { y?: number; m?: number; d?: number };
+type DateParts = { y?: number | undefined; m?: number | undefined; d?: number | undefined };
 export type DateMention = DateParts & { text: string; start: number; end: number };
 
 const MONTHS: Record<string, number> = {
