@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { TONE_VALUES } from "./copilot-shared";
 import {
+  buildTriageInput,
   clearerPhotoRequest,
   conceptsFromNote,
   draftHasCost,
@@ -8,6 +10,8 @@ import {
   interpretationSchema,
   parseJsonObject,
   screenFindings,
+  TRIAGE_REPLY_TONE_GUIDANCE,
+  TRIAGE_SYSTEM_PROMPT,
 } from "./copilot-triage";
 
 describe("conceptsFromNote", () => {
@@ -90,5 +94,33 @@ describe("interpretation shape", () => {
     expect(
       interpretationSchema.safeParse({ ...valid, urgency_routing: { ...valid.urgency_routing, urgency: "asap" } }).success,
     ).toBe(false);
+  });
+});
+
+describe("reply tone", () => {
+  const base = { tenantName: "Sarah Jenkins", propertyLabel: "Unit 1", note: null, regions: [], concepts: ["water stain"] };
+
+  it("defaults the reply tone to Friendly", () => {
+    expect(buildTriageInput(base)).toContain(`Reply tone (tenant_reply only): ${TRIAGE_REPLY_TONE_GUIDANCE.friendly}`);
+  });
+
+  it("passes the selected tone to the reply instructions", () => {
+    expect(buildTriageInput({ ...base, tone: "formal" })).toContain(TRIAGE_REPLY_TONE_GUIDANCE.formal);
+    expect(buildTriageInput({ ...base, tone: "firm_but_fair" })).toContain(TRIAGE_REPLY_TONE_GUIDANCE.firm_but_fair);
+  });
+
+  it("has guidance for exactly the three compose tones", () => {
+    expect(Object.keys(TRIAGE_REPLY_TONE_GUIDANCE).sort()).toEqual([...TONE_VALUES].sort());
+  });
+
+  it("keeps the no-placeholder rule and leaves the work order out of tone", () => {
+    expect(TRIAGE_SYSTEM_PROMPT).toMatch(/NEVER include square brackets or placeholders/);
+    expect(TRIAGE_SYSTEM_PROMPT).toMatch(/every rule above apply the same in every tone/);
+    expect(TRIAGE_SYSTEM_PROMPT).toMatch(/reply tone never applies here/i);
+    for (const g of Object.values(TRIAGE_REPLY_TONE_GUIDANCE)) expect(g).not.toMatch(/[[\]]/);
+  });
+
+  it("keeps the clearer-photo text the same whatever the tone", () => {
+    expect(clearerPhotoRequest("Sarah Jenkins")).toMatch(/Thank you, and we'll follow up once we have them\.$/);
   });
 });

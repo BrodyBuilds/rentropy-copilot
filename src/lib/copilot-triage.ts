@@ -5,6 +5,7 @@
 import { z } from "zod";
 
 import type { SegmentationBox } from "./copilot-segmentation";
+import type { Tone } from "./copilot-shared";
 
 export const DEFAULT_CONCEPT = "water stain";
 export const MAX_CONCEPTS = 3;
@@ -209,7 +210,8 @@ Drafts:
   4. Ask the most useful follow-up questions, each on its own short line.
   5. End with a plain thank-you close such as "Thanks!" and nothing after it — no signature, no name.
   NEVER include square brackets or placeholders of any kind (no [time window], no [Your name], no [anything]). Mention no money. Under 120 words. Plain text, no markdown headings.
-- work_order_summary: for a vendor. The property label, what is visible and where, what is not yet known, the urgency. No tenant contact details, no cost. Under 140 words. Plain text.
+  Tone: write tenant_reply in the tone named under "Reply tone" in the input. The tone changes only the wording; the structure and every rule above apply the same in every tone.
+- work_order_summary: for a vendor. The property label, what is visible and where, what is not yet known, the urgency. No tenant contact details, no cost. Under 140 words. Plain text. The reply tone never applies here; keep it neutral and factual.
 
 Reply with ONLY one JSON object with exactly these five keys and nothing else:
 {
@@ -220,13 +222,24 @@ Reply with ONLY one JSON object with exactly these five keys and nothing else:
   "drafts": { "tenant_reply": "...", "work_order_summary": "..." }
 }`;
 
+/** How each compose tone shapes the tenant reply's wording (never its structure or rules). */
+export const TRIAGE_REPLY_TONE_GUIDANCE: Record<Tone, string> = {
+  friendly: "Friendly — warm and relaxed, like a helpful neighbor; contractions are fine.",
+  firm_but_fair:
+    "Firm but fair — calm, direct and businesslike; clear about the next step, still polite, never stern or threatening.",
+  formal:
+    "Formal — courteous and professional; complete sentences, no slang, fewer contractions, still short and plain.",
+};
+
 export function buildTriageInput(args: {
   tenantName: string;
   propertyLabel: string;
   note: string | null;
   regions: TriageRegion[];
   concepts: string[];
+  tone?: Tone;
 }): string {
+  const tone = args.tone ?? "friendly";
   const regionLines = args.regions.length
     ? args.regions
         .map(
@@ -239,6 +252,8 @@ export function buildTriageInput(args: {
 Property: ${args.propertyLabel}
 
 Tenant's note: ${args.note ? `"${args.note}"` : "(no note)"}
+
+Reply tone (tenant_reply only): ${TRIAGE_REPLY_TONE_GUIDANCE[tone]}
 
 SAM regions (concepts searched: ${args.concepts.join(", ")}):
 ${regionLines}

@@ -25,6 +25,7 @@ import {
   type FindingsRecord,
   type SegmentationRecord,
 } from "./copilot-triage";
+import { TONE_VALUES } from "./copilot-shared";
 
 export const PHOTO_BUCKET = "maintenance-photos";
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -53,6 +54,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
     return {
       tenant_id: z.string().uuid().parse(input.get("tenant_id")),
       note: z.string().max(MAX_NOTE_CHARS).parse(note) || null,
+      tone: z.enum(TONE_VALUES).parse(input.get("tone") ?? "friendly"),
       photo,
     };
   })
@@ -168,6 +170,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
           note: data.note,
           regions,
           concepts,
+          tone: data.tone,
         }),
         { images: [photoUrl], temperature: 0, timeoutMs: 60_000 },
       );
@@ -203,7 +206,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       .insert({
         tenant_id: tenant.id,
         message_type: "maintenance_update",
-        tone: "friendly",
+        tone: data.tone,
         draft_body: tenantReply,
         status: "pending",
         risk_flags: null,
@@ -257,6 +260,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
         triage_id: triage.id,
         sam_model_id: samModelId,
         concepts,
+        tone: data.tone,
         regions: regions.length,
         regions_per_concept: regionsPerConcept,
         visible_findings: screened.kept.length,

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { listTenants } from "@/lib/copilot.functions";
+import { TONES, type Tone } from "@/lib/copilot-shared";
 import { listTriages, runPhotoTriage } from "@/lib/copilot-triage.functions";
 import { TRIAGE_FAILED_MESSAGE } from "@/lib/copilot-triage";
 import { cn } from "@/lib/utils";
@@ -110,6 +111,7 @@ function TriagePage() {
   const [tenantId, setTenantId] = useState<string>(tenants[0]?.id ?? "");
   const [photo, setPhoto] = useState<File | null>(null);
   const [note, setNote] = useState("");
+  const [tone, setTone] = useState<Tone>("friendly");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +124,7 @@ function TriagePage() {
       const form = new FormData();
       form.append("tenant_id", tenantId);
       form.append("note", note);
+      form.append("tone", tone);
       form.append("photo", upload);
       const result = await run({ data: form });
       await queryClient.invalidateQueries({ queryKey: ["triages"] });
@@ -169,6 +172,33 @@ function TriagePage() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div role="radiogroup" aria-label="Tone" className="mt-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tone</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {TONES.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                role="radio"
+                aria-checked={tone === t.value}
+                disabled={running}
+                onClick={() => setTone(t.value)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                  tone === t.value
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background text-foreground hover:bg-secondary",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Used for the reply to the tenant. The work order stays neutral.
+          </p>
         </div>
 
         <div className="mt-5">
