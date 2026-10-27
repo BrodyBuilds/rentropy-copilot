@@ -46,6 +46,60 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Couldn't run",
 };
 
+const MAX_UPLOAD_BYTES = 250 * 1024;
+
+/** Shrink a photo in the browser to a JPEG of at most ~250 KB; falls back to the original if it can't be decoded. */
+async function shrinkPhoto(file: File): Promise<File> {
+  let img: HTMLImageElement;
+  const url = URL.createObjectURL(file);
+  try {
+    img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode failed"));
+      el.src = url;
+    });
+  } catch {
+    URL.revokeObjectURL(url);
+    return file;
+  }
+  try {
+    const w0 = img.naturalWidth;
+    const h0 = img.naturalHeight;
+    if (!w0 || !h0) return file;
+    const encode = (maxDim: number, quality: number) =>
+      new Promise<Blob | null>((resolve) => {
+        const scale = Math.min(1, maxDim / Math.max(w0, h0));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(w0 * scale));
+        canvas.height = Math.max(1, Math.round(h0 * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(null);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(resolve, "image/jpeg", quality);
+      });
+
+    let maxDim = 1600;
+    let quality = 0.85;
+    let blob = await encode(maxDim, quality);
+    if (!blob) return file;
+    while (blob.size > MAX_UPLOAD_BYTES && quality > 0.5 + 1e-9) {
+      quality = Math.max(0.5, Math.round((quality - 0.1) * 100) / 100);
+      blob = (await encode(maxDim, quality)) ?? blob;
+    }
+    while (blob.size > MAX_UPLOAD_BYTES && maxDim > 800) {
+      maxDim = Math.max(800, Math.round(maxDim * 0.75));
+      blob = (await encode(maxDim, quality)) ?? blob;
+    }
+    const base = file.name.replace(/\.[^.]*$/, "") || "photo";
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function TriagePage() {
   const { data: tenants } = useSuspenseQuery(tenantsQuery);
   const { data: runs } = useSuspenseQuery(triagesQuery);
@@ -64,10 +118,11 @@ function TriagePage() {
     setRunning(true);
     setError(null);
     try {
+      const upload = await shrinkPhoto(photo);
       const form = new FormData();
       form.append("tenant_id", tenantId);
       form.append("note", note);
-      form.append("photo", photo);
+      form.append("photo", upload);
       const result = await run({ data: form });
       await queryClient.invalidateQueries({ queryKey: ["triages"] });
       if (!result.ok) {
