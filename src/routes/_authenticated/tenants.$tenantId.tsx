@@ -14,6 +14,7 @@ import {
   allFlags,
   layersThatRan,
 } from "@/components/risk-check";
+import { TenantQaPanel } from "@/components/tenant-qa-panel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -456,6 +457,8 @@ function ComposePage() {
           </aside>
         </section>
       )}
+
+      <TenantQaPanel tenant={tenant} />
     </div>
   );
 }

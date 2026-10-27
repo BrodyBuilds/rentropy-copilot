@@ -7,4 +7,5 @@
 - [x] Add META_MODEL_API_KEY, META_MODEL_ID, META_MODEL_API_BASE_URL secrets
 - [x] Slice 2: risk check (rule checks + AI language review, span verification, apply rewrites, stale banner, high-flag confirm)
 - [x] Slice 3: photo triage (private photo bucket, SAM regions, five-field interpretation, tenant reply draft, work order approve-and-copy)
-- [ ] Add META_SAM_MODEL_ID value (waiting on user)
+- [x] Add META_SAM_MODEL_ID value
+- [x] Slice 4: read-only tenant Q&A panel (scope check, code answers, verified AI wording, qa audit action)
