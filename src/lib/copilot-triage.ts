@@ -185,9 +185,7 @@ Thank you for sending the photo. Unfortunately we can't make out the problem cle
 - A close-up of the problem
 - If water is involved, a photo of the shutoff valve
 
-Thank you, and we'll follow up once we have them.
-
-[Your name]`;
+Thank you, and we'll follow up once we have them.`;
 }
 
 /* ---------- Model prompt ---------- */
