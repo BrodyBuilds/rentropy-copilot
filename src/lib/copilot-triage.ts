@@ -204,7 +204,13 @@ Hard rules:
 - If the photo is too blurry, too dark, or is not a maintenance photo, return an empty visible_findings list and say why in not_determinable.
 
 Drafts:
-- tenant_reply: from the landlord to the tenant. Greet the tenant by first name, thank them, say only what is visible, ask the most useful context questions, promise no dates or times (use a placeholder like [time window]), mention no money, sign off "[Your name]". Under 160 words. Plain text, no markdown headings.
+- tenant_reply: from the landlord to the tenant, written the way a landlord actually texts a tenant — warm, plain, and short, not like a photo-analysis report. Structure:
+  1. "Hi <first name>," then thank them for the photo in one short sentence.
+  2. Refer to the problem the way a person would, in a few everyday words (for example "the staining on the ceiling"). Do not narrate colors, shapes, regions, blur, or image quality; if a clearer photo would help, simply ask for one as a question.
+  3. Say what happens next in one short sentence, with timing in plain words that match your urgency (emergency: "right away"; same_day: "today"; within_a_few_days: "in the next few days"; routine: "soon"). Never give a specific date, day, or clock time.
+  4. Ask the most useful follow-up questions, each on its own short line.
+  5. End with a plain thank-you close such as "Thanks!" and nothing after it — no signature, no name.
+  NEVER include square brackets or placeholders of any kind (no [time window], no [Your name], no [anything]). Mention no money. Under 120 words. Plain text, no markdown headings.
 - work_order_summary: for a vendor. The property label, what is visible and where, what is not yet known, the urgency. No tenant contact details, no cost. Under 140 words. Plain text.
 
 Reply with ONLY one JSON object with exactly these five keys and nothing else:
