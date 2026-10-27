@@ -24,7 +24,6 @@ import {
   TRIAGE_SYSTEM_PROMPT,
   type FindingsRecord,
   type SegmentationRecord,
-  type TriageRegion,
 } from "./copilot-triage";
 
 export const PHOTO_BUCKET = "maintenance-photos";
