@@ -5,6 +5,9 @@
 // optional c confidence, plus a `mask` token with encoded data. Masks are kept
 // only inside the raw text; boxes and confidences are parsed out here.
 
+import type { SegmentationRecord, TriageRegion } from "./copilot-triage";
+
+
 export type SegmentationBox = {
   frame: number;
   x1: number;
@@ -112,34 +115,64 @@ function textFromResponseObject(obj: unknown): string {
 
 export class StreamError extends Error {}
 
+/** A non-empty body that is not a /responses reply at all (e.g. an HTML error page). */
+export class UnreadableResponseError extends Error {}
+
+function looksLikeResponseObject(obj: unknown): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  const r = obj as ResponsesOutput & { object?: unknown };
+  return typeof r.output_text === "string" || Array.isArray(r.output) || r.object === "response";
+}
+
 /**
  * Reads the output text from a /responses reply: a server-sent-event stream
  * (delta / done / completed events) or, as a fallback, a plain JSON body.
- * Throws StreamError when the stream reports a failure.
+ *
+ * An empty string means a well-formed reply with an empty output lane, which
+ * SAM uses for "zero matches". Throws StreamError when the reply reports a
+ * failure, and UnreadableResponseError when a non-empty body is not a
+ * /responses reply at all, so a malformed reply is never mistaken for zero matches.
  */
 export function readResponsesText(raw: string): string {
   const trimmed = raw.trim();
+  if (!trimmed) return "";
   if (trimmed.startsWith("{")) {
+    let parsed: unknown;
     try {
-      return textFromResponseObject(JSON.parse(trimmed)).trim();
+      parsed = JSON.parse(trimmed);
     } catch {
-      // fall through to SSE parsing
+      parsed = undefined; // fall through to SSE parsing
+    }
+    if (parsed !== undefined) {
+      if (parsed && typeof parsed === "object" && (parsed as { error?: unknown }).error) {
+        throw new StreamError("Segmentation reply reported an error");
+      }
+      if (!looksLikeResponseObject(parsed)) {
+        throw new UnreadableResponseError("Segmentation reply was not a responses object");
+      }
+      return textFromResponseObject(parsed).trim();
     }
   }
 
+  let recognized = false;
   let deltas = "";
   const done: string[] = [];
   let completed = "";
   for (const line of raw.split(/\r?\n/)) {
     if (!line.startsWith("data:")) continue;
     const payload = line.slice(5).trim();
-    if (!payload || payload === "[DONE]") continue;
+    if (!payload) continue;
+    if (payload === "[DONE]") {
+      recognized = true;
+      continue;
+    }
     let event: { type?: string; delta?: unknown; text?: unknown; response?: unknown; error?: unknown };
     try {
       event = JSON.parse(payload);
     } catch {
       continue;
     }
+    if (typeof event.type === "string") recognized = true;
     switch (event.type) {
       case "response.output_text.delta":
         if (typeof event.delta === "string") deltas += event.delta;
@@ -156,6 +189,73 @@ export function readResponsesText(raw: string): string {
         throw new StreamError("Segmentation stream reported an error");
     }
   }
+  if (!recognized) throw new UnreadableResponseError("Segmentation reply was not a responses stream");
   const text = done.length ? done.join("\n") : deltas || completed;
   return text.trim();
+}
+
+/* ---------- Per-concept stage ---------- */
+
+export type ConceptSegmentation = {
+  concept: string;
+  boxes: SegmentationBox[];
+  unparsed: number;
+  rawText: string;
+  /** Null when the concept came back empty and no model ID was reported. */
+  modelId: string | null;
+  /** True when SAM returned an empty output lane: zero matches, not an error. */
+  empty: boolean;
+};
+
+/**
+ * Runs one SAM request per concept. An empty output for a concept is a valid
+ * "zero matches" result and processing continues with the other concepts; any
+ * other error (HTTP, not configured, malformed reply) is rethrown unchanged so
+ * the caller can fail honestly.
+ */
+export async function segmentConcepts(
+  concepts: string[],
+  segment: (concept: string) => Promise<{ boxes: SegmentationBox[]; unparsed: number; rawText: string; modelId: string }>,
+  emptyOutputModelId: (error: unknown) => string | null | undefined,
+): Promise<ConceptSegmentation[]> {
+  return Promise.all(
+    concepts.map(async (concept): Promise<ConceptSegmentation> => {
+      try {
+        const r = await segment(concept);
+        return { concept, boxes: r.boxes, unparsed: r.unparsed, rawText: r.rawText, modelId: r.modelId, empty: r.rawText.trim() === "" };
+      } catch (error) {
+        const modelId = emptyOutputModelId(error);
+        if (modelId === undefined) throw error;
+        return { concept, boxes: [], unparsed: 0, rawText: "", modelId, empty: true };
+      }
+    }),
+  );
+}
+
+/**
+ * Numbers every region across concepts (1, 2, 3 …) and builds the stored
+ * segmentation record plus a region count per concept, zeros included.
+ */
+export function assembleSegmentation(
+  results: ConceptSegmentation[],
+  fallbackModelId: string | null,
+): { regions: TriageRegion[]; record: SegmentationRecord; regionsPerConcept: Record<string, number> } {
+  const samModelId = results.find((r) => r.modelId)?.modelId ?? fallbackModelId ?? "";
+  let n = 0;
+  const regions: TriageRegion[] = results.flatMap((r) =>
+    r.boxes.map((box) => ({ ...box, n: ++n, concept: r.concept })),
+  );
+  const record: SegmentationRecord = {
+    version: 1,
+    sam_model_id: samModelId,
+    requests: results.map((r) => ({
+      concept: r.concept,
+      raw_text: r.rawText,
+      box_count: r.boxes.length,
+      unparsed: r.unparsed,
+    })),
+    regions,
+  };
+  const regionsPerConcept = Object.fromEntries(results.map((r) => [r.concept, r.boxes.length]));
+  return { regions, record, regionsPerConcept };
 }

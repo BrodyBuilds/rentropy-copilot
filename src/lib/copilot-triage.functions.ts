@@ -10,8 +10,8 @@ import {
   configuredSamModelId,
   missingTriageConfig,
   ModelCallError,
-  type SegmentationResult,
 } from "./copilot-model.server";
+import { assembleSegmentation, segmentConcepts, type ConceptSegmentation } from "./copilot-segmentation";
 import {
   buildTriageInput,
   clearerPhotoRequest,
@@ -24,7 +24,6 @@ import {
   TRIAGE_SYSTEM_PROMPT,
   type FindingsRecord,
   type SegmentationRecord,
-  type TriageRegion,
 } from "./copilot-triage";
 
 export const PHOTO_BUCKET = "maintenance-photos";
@@ -130,10 +129,15 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
     const photoUrl = signed.data.signedUrl;
 
     // 2. Localize with SAM: one request per concept phrase, keep every region.
-    let samResults: Array<SegmentationResult & { concept: string }>;
+    // An empty output lane means zero matches for that concept, so it counts as
+    // zero regions; HTTP errors, missing settings and malformed replies still fail.
+    let samResults: ConceptSegmentation[];
     try {
-      samResults = await Promise.all(
-        concepts.map(async (concept) => ({ concept, ...(await callSegmentation(concept, photoUrl)) })),
+      samResults = await segmentConcepts(
+        concepts,
+        (concept) => callSegmentation(concept, photoUrl),
+        (error) =>
+          error instanceof ModelCallError && error.code === "empty_output" ? error.modelId : undefined,
       );
     } catch (error) {
       const code = error instanceof ModelCallError ? error.code : "unknown";
@@ -141,22 +145,12 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       return failRun(`segmentation_${code}`, modelId, triage.id);
     }
 
-    const samModelId = samResults[0]?.modelId ?? configuredSamModelId() ?? "";
-    let n = 0;
-    const regions: TriageRegion[] = samResults.flatMap((r) =>
-      r.boxes.map((box) => ({ ...box, n: ++n, concept: r.concept })),
-    );
-    const segmentation: SegmentationRecord = {
-      version: 1,
-      sam_model_id: samModelId,
-      requests: samResults.map((r) => ({
-        concept: r.concept,
-        raw_text: r.rawText,
-        box_count: r.boxes.length,
-        unparsed: r.unparsed,
-      })),
+    const {
       regions,
-    };
+      record: segmentation,
+      regionsPerConcept,
+    } = assembleSegmentation(samResults, configuredSamModelId());
+    const samModelId = segmentation.sam_model_id;
     await supabase
       .from("copilot_photo_triage")
       .update({ segmentation: segmentation as unknown as Json })
@@ -264,6 +258,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
         sam_model_id: samModelId,
         concepts,
         regions: regions.length,
+        regions_per_concept: regionsPerConcept,
         visible_findings: screened.kept.length,
         dropped_findings: screened.dropped,
         outcome: usable ? "findings" : "needs_clearer_photo",
