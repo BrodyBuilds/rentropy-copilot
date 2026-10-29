@@ -149,7 +149,9 @@ export function describeAuditEntry(action: string, modelId: string | null, detai
       if (modelId) add("Model", modelId);
       if (has(d, "topics")) add("Topics", formatAuditValue(d["topics"]));
       if (has(d, "fact_fields")) add("Facts used", formatAuditValue(d["fact_fields"]));
-      if (has(d, "missing")) add("Not in the record", formatAuditValue(d["missing"]));
+      if (Array.isArray(d["missing"]) && d["missing"].length > 0) {
+        add("Not in the record", formatAuditValue(d["missing"]));
+      }
       if (has(d, "mismatched_figures")) add("Figures that didn't match", formatAuditValue(d["mismatched_figures"]));
       break;
     }
