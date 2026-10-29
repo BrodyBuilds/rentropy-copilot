@@ -230,7 +230,9 @@ export const copilotDraft = createServerFn({ method: "POST" })
       return { ok: false, error: "The AI couldn't write a draft just now. Please try again." };
     }
 
-    const { data: draft, error: draftError } = await supabase
+    // Drafts are written only by the server (the tenant row above was read as the user).
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: draft, error: draftError } = await supabaseAdmin
       .from("copilot_drafts")
       .insert({
         tenant_id: tenant.id,
@@ -313,7 +315,9 @@ export const decideDraft = createServerFn({ method: "POST" })
       data.draft_body !== undefined &&
       data.draft_body !== current.draft_body;
 
-    const { data: updated, error: updateError } = await supabase
+    // The decision gates above run here, so the server is the only write path.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: updated, error: updateError } = await supabaseAdmin
       .from("copilot_drafts")
       .update({
         status: data.decision === "approve" ? "approved" : "discarded",
@@ -537,7 +541,9 @@ export const runRiskCheck = createServerFn({ method: "POST" })
         }
       : buildPartialRiskResult({ body, checkedAt, modelId: modelId ?? "not_configured", deterministic });
 
-    const { data: updated, error: updateError } = await supabase
+    // Risk results are written only by the server (the draft above was read as the user).
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: updated, error: updateError } = await supabaseAdmin
       .from("copilot_drafts")
       .update({ risk_flags: result as unknown as Json, risk_checked_at: checkedAt })
       .eq("id", draft.id)
@@ -546,7 +552,7 @@ export const runRiskCheck = createServerFn({ method: "POST" })
       .maybeSingle();
     // Nothing usable was recorded: never leave a result (older or new) looking current.
     const clearStoredResult = async () => {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from("copilot_drafts")
         .update({ risk_flags: null, risk_checked_at: null })
         .eq("id", draft.id)
