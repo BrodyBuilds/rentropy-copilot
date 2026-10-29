@@ -9,3 +9,4 @@
 - [x] Slice 3: photo triage (private photo bucket, SAM regions, five-field interpretation, tenant reply draft, work order approve-and-copy)
 - [x] Add META_SAM_MODEL_ID value
 - [x] Slice 4: read-only tenant Q&A panel (scope check, code answers, verified AI wording, qa audit action)
+- [x] Compose flow: English / Spanish draft language (prompt + audit detail, "Draft — Spanish" label)
