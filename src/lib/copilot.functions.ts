@@ -229,6 +229,9 @@ export const copilotDraft = createServerFn({ method: "POST" })
 
 /* ---------- Approve / discard ---------- */
 
+export const PARTIAL_ACK_REQUIRED_MESSAGE =
+  "The language review did not run. Confirm you reviewed this draft yourself before approving.";
+
 export const decideDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
@@ -237,6 +240,8 @@ export const decideDraft = createServerFn({ method: "POST" })
         draft_id: z.string().uuid(),
         decision: z.enum(["approve", "discard"]),
         draft_body: z.string().trim().min(1).max(5000).optional(),
+        // Required to approve a draft whose stored risk result is partial.
+        partial_review_acknowledged: z.boolean().optional(),
       })
       .parse(input),
   )
@@ -245,12 +250,17 @@ export const decideDraft = createServerFn({ method: "POST" })
 
     const { data: current, error: readError } = await supabase
       .from("copilot_drafts")
-      .select("id, tenant_id, status, draft_body")
+      .select("id, tenant_id, status, draft_body, risk_flags")
       .eq("id", data.draft_id)
       .maybeSingle();
     if (readError) throw new Error("Could not load draft");
     if (!current) throw new Error("Draft not found");
     if (current.status !== "pending") throw new Error("This draft has already been decided");
+
+    const approvingPartial = data.decision === "approve" && isPartialRiskResult(current.risk_flags);
+    if (approvingPartial && data.partial_review_acknowledged !== true) {
+      throw new Error(PARTIAL_ACK_REQUIRED_MESSAGE);
+    }
 
     const edited =
       data.decision === "approve" &&
@@ -272,13 +282,27 @@ export const decideDraft = createServerFn({ method: "POST" })
     if (updateError) throw new Error("Could not update draft");
     if (!updated) throw new Error("This draft has already been decided");
 
-    await supabase.from("copilot_audit_log").insert({
-      draft_id: updated.id,
-      tenant_id: updated.tenant_id,
-      action: data.decision,
-      model_id: null,
-      detail: { edited },
-    });
+    await supabase.from("copilot_audit_log").insert(
+      approvingPartial
+        ? {
+            draft_id: updated.id,
+            tenant_id: updated.tenant_id,
+            action: "approved_after_partial_review",
+            model_id: null,
+            detail: {
+              edited,
+              partial_review_acknowledged: true,
+              summary: "Approved after the landlord confirmed a manual review — language review did not run",
+            },
+          }
+        : {
+            draft_id: updated.id,
+            tenant_id: updated.tenant_id,
+            action: data.decision,
+            model_id: null,
+            detail: { edited },
+          },
+    );
 
     return updated;
   });
