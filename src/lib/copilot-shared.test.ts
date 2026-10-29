@@ -60,3 +60,18 @@ describe("Facts used", () => {
     for (const f of facts) expect(Object.keys(sarah)).toContain(f.field);
   });
 });
+
+describe("Draft language", () => {
+  it("labels a Spanish draft 'Draft — Spanish' and an English one plainly 'Draft'", async () => {
+    const { draftHeading } = await import("./copilot-shared");
+    expect(draftHeading("es")).toBe("Draft — Spanish");
+    expect(draftHeading("en")).toBe("Draft");
+  });
+
+  it("treats drafts with no recorded language as English", async () => {
+    const { draftLanguageFromDetail } = await import("./copilot-shared");
+    expect(draftLanguageFromDetail(null)).toBe("en");
+    expect(draftLanguageFromDetail({ tone: "friendly" })).toBe("en");
+    expect(draftLanguageFromDetail({ language: "es" })).toBe("es");
+  });
+});

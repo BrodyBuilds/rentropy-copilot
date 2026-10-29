@@ -60,7 +60,7 @@ const sarah = {
 type Op = { table: string; kind: string; payload?: unknown };
 
 /** A tiny stand-in for the Supabase client that records writes. */
-function fakeSupabase(opts: { draft: Record<string, unknown> }) {
+function fakeSupabase(opts: { draft: Record<string, unknown>; generateDetail?: Record<string, unknown> }) {
   const ops: Op[] = [];
   const client = {
     from(table: string) {
@@ -68,7 +68,13 @@ function fakeSupabase(opts: { draft: Record<string, unknown> }) {
       let payload: unknown;
       let neq = false;
       const result = () => {
-        if (kind === "insert") return { data: null, error: null };
+        if (kind === "insert") {
+          if (table === "copilot_drafts") return { data: { id: DRAFT_ID, ...(payload as object) }, error: null };
+          return { data: null, error: null };
+        }
+        if (table === "copilot_audit_log") {
+          return { data: opts.generateDetail ? { detail: opts.generateDetail } : null, error: null };
+        }
         if (table === "demo_tenants") return { data: neq ? [] : sarah, error: null };
         if (table === "copilot_drafts" && kind === "update") {
           return { data: { ...opts.draft, ...(payload as object) }, error: null };
@@ -90,6 +96,7 @@ function fakeSupabase(opts: { draft: Record<string, unknown> }) {
         },
         insert: (p: unknown) => {
           kind = "insert";
+          payload = p;
           ops.push({ table, kind, payload: p });
           return b;
         },
@@ -244,5 +251,89 @@ describe("decideDraft — partial acknowledgment gate", () => {
 
     const audit = ops.find((o) => o.table === "copilot_audit_log")!.payload as Record<string, unknown>;
     expect(audit["action"]).toBe("approve");
+  });
+});
+
+describe("draft language (compose flow)", () => {
+  const prompts = () => mockedCallModel.mock.calls.map((c) => c[1] as string);
+  const audits = (ops: Op[]) =>
+    ops.filter((o) => o.table === "copilot_audit_log").map((o) => o.payload as Record<string, unknown>);
+
+  it("defaults to English, with no Spanish instruction, and records en on the generate row", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Hi Sarah", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    expect(res.ok && res.language).toBe("en");
+    expect(prompts()[0]).not.toMatch(/Spanish/);
+    expect((audits(ops)[0]!["detail"] as Record<string, unknown>)["language"]).toBe("en");
+  });
+
+  it("Spanish asks the model for Spanish using exactly the same tenant facts", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Hola Sarah", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+    const base = { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" };
+
+    await copilotDraft({ data: base, context: { supabase: client, userId: "u1" } } as never);
+    const res = await copilotDraft({
+      data: { ...base, language: "es" },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    const [english, spanish] = prompts();
+    expect(spanish).toMatch(/Write the entire message in Spanish/);
+    const factLines = (p: string) => p.split("\n").filter((l) => l.startsWith("- "));
+    expect(factLines(spanish!)).toEqual(factLines(english!));
+    expect(factLines(spanish!).join("\n")).not.toMatch(/James|Maple Ridge/);
+    expect(res.ok && res.language).toBe("es");
+    const generate = audits(ops).filter((a) => a["action"] === "generate");
+    expect((generate[1]!["detail"] as Record<string, unknown>)["language"]).toBe("es");
+  });
+
+  it("records Spanish on a failed drafting attempt's model_error row", async () => {
+    mockedCallModel.mockRejectedValue(new ModelCallError("down", "meta-test-model", "http_error"));
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly", language: "es" },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    expect(res.ok).toBe(false);
+    expect(ops.some((o) => o.table === "copilot_drafts")).toBe(false);
+    const row = audits(ops)[0]!;
+    expect(row["action"]).toBe("model_error");
+    expect((row["detail"] as Record<string, unknown>)["language"]).toBe("es");
+  });
+
+  it("approve and discard record the draft's language from its generate row", async () => {
+    for (const decision of ["approve", "discard"] as const) {
+      const { client, ops } = fakeSupabase({ draft: pendingDraft(), generateDetail: { language: "es" } });
+      await decideDraft({
+        data: { draft_id: DRAFT_ID, decision, ...(decision === "approve" ? { draft_body: BODY } : {}) },
+        context: { supabase: client, userId: "u1" },
+      } as never);
+      const row = audits(ops)[0]!;
+      expect(row["action"]).toBe(decision);
+      expect(row["detail"]).toEqual({ edited: false, language: "es" });
+    }
+  });
+
+  it("risk check runs unchanged on Spanish text: rule checks flag a wrong amount, language review gets the draft as-is", async () => {
+    const spanishBody = "Hola Sarah Jenkins, su saldo de $500.00 está vencido. Gracias.";
+    mockedCallModel.mockResolvedValue({ text: "[]", modelId: "meta-test-model" });
+    const { client } = fakeSupabase({ draft: pendingDraft({ draft_body: spanishBody }) });
+
+    const res = await runRiskCheck({
+      data: { draft_id: DRAFT_ID, draft_body: spanishBody },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    expect(res.ok && res.result.deterministic_flags.some((f) => f.quote === "$500.00")).toBe(true);
+    expect(prompts()[0]).toContain(spanishBody);
   });
 });

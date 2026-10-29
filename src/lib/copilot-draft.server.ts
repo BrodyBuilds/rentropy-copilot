@@ -1,6 +1,7 @@
 import {
   messageTypeLabel,
   toneLabel,
+  type DraftLanguage,
   type Fact,
   type MessageType,
   type Tone,
@@ -16,15 +17,24 @@ Rules:
 - Write the message body only: a short greeting using the tenant's name, the message, and a sign-off of "[Your name]". No subject line, no commentary, no markdown.
 - Keep it under 180 words.`;
 
+/**
+ * Extra instruction for a Spanish draft. The facts themselves never change; amounts and
+ * dates are copied exactly as given so the rule checks read the Spanish text unchanged.
+ */
+export const SPANISH_DRAFT_INSTRUCTION = `Language: Spanish
+Write the entire message in Spanish — greeting, body, and sign-off — in clear, plain, respectful Spanish. Every rule above still applies. Copy every dollar amount exactly as written in the facts (same $ sign, commas, and cents) and every date exactly as written in the facts; do not translate, convert, or reformat amounts or dates. Keep the tenant's name exactly as written, and keep the sign-off placeholder "[Your name]" exactly as written.`;
+
 export function buildDraftInput(args: {
   facts: Fact[];
   messageType: MessageType;
   tone: Tone;
+  language?: DraftLanguage;
 }): string {
   const factLines = args.facts.map((f) => `- ${f.label}: ${f.value}`).join("\n");
+  const languageBlock = args.language === "es" ? `\n${SPANISH_DRAFT_INSTRUCTION}\n` : "";
   return `Message type: ${messageTypeLabel(args.messageType)}
 Tone: ${toneLabel(args.tone)}
-
+${languageBlock}
 Tenant facts (the only facts you may use):
 ${factLines}
 
