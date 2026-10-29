@@ -78,6 +78,10 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
 
     const concepts = conceptsFromNote(data.note);
 
+    // Triage rows and drafts are written only by the server (the tenant above was read as
+    // the user); the photo upload and audit rows stay on the user's own access.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
     // Every failed run: the row leaves "processing" for "failed" and a model_error row is
     // written. Both writes are checked; the run reports failure either way.
     async function failRun(
@@ -87,7 +91,10 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       opts: { message?: string; detail?: Record<string, unknown> } = {},
     ) {
       if (triageId) {
-        const { error } = await supabase.from("copilot_photo_triage").update({ status: "failed" }).eq("id", triageId);
+        const { error } = await supabaseAdmin
+          .from("copilot_photo_triage")
+          .update({ status: "failed" })
+          .eq("id", triageId);
         if (error) console.error("[triage] marking run failed did not save", error);
       }
       const { error: auditError } = await supabase.from("copilot_audit_log").insert({
