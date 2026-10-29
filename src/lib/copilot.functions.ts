@@ -18,8 +18,12 @@ import {
 } from "./copilot-risk";
 import {
   buildFacts,
+  DEFAULT_DRAFT_LANGUAGE,
+  DRAFT_LANGUAGE_VALUES,
+  draftLanguageFromDetail,
   MESSAGE_TYPE_VALUES,
   TONE_VALUES,
+  type DraftLanguage,
   type Fact,
   type TenantRecord,
 } from "./copilot-shared";
@@ -30,6 +34,20 @@ const TENANT_COLUMNS =
 const DEMO_EMAIL = "demo-landlord@example.com";
 
 export type DraftRow = Database["public"]["Tables"]["copilot_drafts"]["Row"];
+
+type Supabase = { from: (table: "copilot_audit_log") => any };
+
+/** A draft's language, read from its "generate" audit row (English when none is recorded). */
+async function readDraftLanguage(supabase: Supabase, draftId: string): Promise<DraftLanguage> {
+  const { data, error } = await supabase
+    .from("copilot_audit_log")
+    .select("detail")
+    .eq("draft_id", draftId)
+    .eq("action", "generate")
+    .maybeSingle();
+  if (error) return DEFAULT_DRAFT_LANGUAGE;
+  return draftLanguageFromDetail(data?.detail);
+}
 
 /* ---------- One-click demo sign-in (public by design) ---------- */
 
@@ -147,13 +165,15 @@ export const getDraft = createServerFn({ method: "GET" })
       .eq("id", data.draftId)
       .maybeSingle();
     if (error) throw new Error("Could not load draft");
-    return draft satisfies DraftRow | null;
+    if (!draft) return null;
+    const language = await readDraftLanguage(context.supabase, draft.id);
+    return { ...(draft satisfies DraftRow), language };
   });
 
 /* ---------- copilot_draft ---------- */
 
 export type CopilotDraftResult =
-  | { ok: true; draft: DraftRow; facts: Fact[]; modelId: string }
+  | { ok: true; draft: DraftRow; facts: Fact[]; modelId: string; language: DraftLanguage }
   | { ok: false; error: string };
 
 export const copilotDraft = createServerFn({ method: "POST" })
@@ -164,6 +184,7 @@ export const copilotDraft = createServerFn({ method: "POST" })
         tenant_id: z.string().uuid(),
         message_type: z.enum(MESSAGE_TYPE_VALUES),
         tone: z.enum(TONE_VALUES),
+        language: z.enum(DRAFT_LANGUAGE_VALUES).default(DEFAULT_DRAFT_LANGUAGE),
       })
       .parse(input),
   )
@@ -180,7 +201,12 @@ export const copilotDraft = createServerFn({ method: "POST" })
     if (!tenant) return { ok: false, error: "Tenant not found." };
 
     const facts = buildFacts(tenant, data.message_type);
-    const input = buildDraftInput({ facts, messageType: data.message_type, tone: data.tone });
+    const input = buildDraftInput({
+      facts,
+      messageType: data.message_type,
+      tone: data.tone,
+      language: data.language,
+    });
 
     let result: { text: string; modelId: string };
     try {
@@ -192,7 +218,12 @@ export const copilotDraft = createServerFn({ method: "POST" })
         tenant_id: tenant.id,
         action: "model_error",
         model_id: modelId,
-        detail: { message_type: data.message_type, tone: data.tone, error_code: code },
+        detail: {
+          message_type: data.message_type,
+          tone: data.tone,
+          language: data.language,
+          error_code: code,
+        },
       });
       return { ok: false, error: "The AI couldn't write a draft just now. Please try again." };
     }
@@ -222,11 +253,12 @@ export const copilotDraft = createServerFn({ method: "POST" })
       detail: {
         message_type: data.message_type,
         tone: data.tone,
+        language: data.language,
         fact_fields: facts.map((f) => f.field),
       },
     });
 
-    return { ok: true, draft, facts, modelId: result.modelId };
+    return { ok: true, draft, facts, modelId: result.modelId, language: data.language };
   });
 
 /* ---------- Approve / discard ---------- */
@@ -264,6 +296,8 @@ export const decideDraft = createServerFn({ method: "POST" })
       throw new Error(PARTIAL_ACK_REQUIRED_MESSAGE);
     }
 
+    const language = await readDraftLanguage(supabase, current.id);
+
     const edited =
       data.decision === "approve" &&
       data.draft_body !== undefined &&
@@ -293,6 +327,7 @@ export const decideDraft = createServerFn({ method: "POST" })
             model_id: null,
             detail: {
               edited,
+              language,
               partial_review_acknowledged: true,
               summary: "Approved after the landlord confirmed a manual review — language review did not run",
             },
@@ -302,7 +337,7 @@ export const decideDraft = createServerFn({ method: "POST" })
             tenant_id: updated.tenant_id,
             action: data.decision,
             model_id: null,
-            detail: { edited },
+            detail: { edited, language },
           },
     );
 
@@ -551,6 +586,12 @@ function auditSummary(action: string, detail: Json | null): string | null {
     return "During drafting";
   }
   if (action === "approve" && d["kind"] === "work_order") return "Work order";
+  if (
+    (action === "generate" || action === "approve" || action === "discard") &&
+    d["language"] === "es"
+  ) {
+    return "Spanish draft";
+  }
   if (action === "photo_triage") {
     const regions = Number(d["regions"] ?? 0);
     const found = Number(d["visible_findings"] ?? 0);
