@@ -33,6 +33,40 @@ export function toneLabel(value: string): string {
   return TONES.find((t) => t.value === value)?.label ?? value;
 }
 
+/** Language the compose-flow draft is written in. English is the default. */
+export const DRAFT_LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Spanish" },
+] as const;
+
+export type DraftLanguage = (typeof DRAFT_LANGUAGES)[number]["value"];
+
+export const DRAFT_LANGUAGE_VALUES = DRAFT_LANGUAGES.map((l) => l.value) as [
+  DraftLanguage,
+  ...DraftLanguage[],
+];
+
+export const DEFAULT_DRAFT_LANGUAGE: DraftLanguage = "en";
+
+export function draftLanguageLabel(value: string): string {
+  return DRAFT_LANGUAGES.find((l) => l.value === value)?.label ?? value;
+}
+
+/**
+ * A draft's language lives on its "generate" audit row (copilot_drafts has no language
+ * field). Drafts without one — older drafts and photo-triage replies — are English.
+ */
+export function draftLanguageFromDetail(detail: unknown): DraftLanguage {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return DEFAULT_DRAFT_LANGUAGE;
+  const value = (detail as Record<string, unknown>)["language"];
+  return DRAFT_LANGUAGES.find((l) => l.value === value)?.value ?? DEFAULT_DRAFT_LANGUAGE;
+}
+
+/** Heading for the review screen, so the landlord always knows which language will be sent. */
+export function draftHeading(language: DraftLanguage): string {
+  return language === "en" ? "Draft" : `Draft — ${draftLanguageLabel(language)}`;
+}
+
 export type TenantRecord = {
   id: string;
   full_name: string;
