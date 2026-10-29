@@ -1,4 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { createElement } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The server function runs for real with a stand-in createServerFn; the panel's
+// useServerFn hands back `askMock` so the panel can be driven without a server.
+const askMock = vi.fn();
+vi.mock("@tanstack/react-start", () => ({
+  useServerFn: () => askMock,
+  createServerFn: () => {
+    let validate: (input: unknown) => unknown = (x) => x;
+    const builder = {
+      middleware: () => builder,
+      validator: (fn: (input: unknown) => unknown) => {
+        validate = fn;
+        return builder;
+      },
+      handler:
+        (fn: (args: { data: unknown; context: unknown }) => unknown) =>
+        (args: { data: unknown; context: unknown }) =>
+          fn({ data: validate(args.data), context: args.context }),
+    };
+    return builder;
+  },
+}));
+vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
+vi.mock("./copilot-model.server", () => {
+  class ModelCallError extends Error {
+    constructor(
+      message: string,
+      readonly modelId: string | null,
+      readonly code: string,
+    ) {
+      super(message);
+    }
+  }
+  return { ModelCallError, callModel: vi.fn(), configuredModelId: () => "meta-test-model" };
+});
+
+import { TenantQaPanel } from "@/components/tenant-qa-panel";
+import { callModel } from "./copilot-model.server";
+import { askAboutTenant } from "./copilot-qa.functions";
 
 import {
   CROSS_SCOPE_MESSAGE,
@@ -271,5 +312,137 @@ describe("dates verify only as full stored dates", () => {
 
   it("'may' as a verb is not read as a date", () => {
     expect(verifyModelAnswer("She may owe $2,450.00; her lease ends February 28, 2027.", facts).ok).toBe(true);
+  });
+});
+
+/* ---------- Server function: refusal before any model call ---------- */
+
+type Op = { table: string; kind: string; columns?: string; payload?: unknown };
+
+/** Stand-in Supabase client: the page tenant's row by id, and the list of all tenants' names. */
+function fakeSupabase(page: TenantRecord, all: TenantRecord[]) {
+  const ops: Op[] = [];
+  const client = {
+    from(table: string) {
+      const op: Op = { table, kind: "select" };
+      ops.push(op);
+      const b = {
+        select: (columns: string) => {
+          op.columns = columns;
+          return b;
+        },
+        eq: () => b,
+        insert: (p: unknown) => {
+          op.kind = "insert";
+          op.payload = p;
+          return b;
+        },
+        maybeSingle: async () => ({ data: page, error: null }),
+        then: (resolve: (v: unknown) => unknown) =>
+          Promise.resolve(
+            op.kind === "insert"
+              ? { data: null, error: null }
+              : { data: all.map((t) => ({ id: t.id, full_name: t.full_name })), error: null },
+          ).then(resolve),
+      };
+      return b;
+    },
+  };
+  return { client, ops };
+}
+
+const mockedCallModel = vi.mocked(callModel);
+
+describe("askAboutTenant", () => {
+  beforeEach(() => mockedCallModel.mockReset());
+
+  const run = (question: string) => {
+    const { client, ops } = fakeSupabase(sarah, [sarah, james]);
+    const call = askAboutTenant as unknown as (args: { data: unknown; context: unknown }) => Promise<unknown>;
+    return { ops, result: call({ data: { tenant_id: sarah.id, question }, context: { supabase: client } }) };
+  };
+
+  it("refuses a lowercase other-tenant question with no model call and a refused_cross_scope audit row", async () => {
+    const { ops, result } = run("what does james carter owe?");
+    expect(await result).toEqual({ ok: true, outcome: "refused", message: CROSS_SCOPE_MESSAGE });
+    expect(mockedCallModel).not.toHaveBeenCalled();
+    const audits = ops.filter((o) => o.kind === "insert");
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.payload).toMatchObject({
+      tenant_id: sarah.id,
+      action: "qa",
+      model_id: null,
+      detail: { outcome: "refused_cross_scope", model_called: false },
+    });
+  });
+
+  it("reads only names from the tenant list, never other tenants' facts", async () => {
+    const { ops, result } = run("what does james owe?");
+    await result;
+    const lists = ops.filter((o) => o.table === "demo_tenants" && o.columns === "id, full_name");
+    expect(lists).toHaveLength(1);
+  });
+
+  it("sends the model only the page tenant's facts for a rent-and-balance question", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Her rent is $2,450.00 and her balance is $2,450.00.", modelId: "m" });
+    const { result } = run("What is her rent and balance?");
+    expect(await result).toMatchObject({ ok: true, outcome: "answered", answer: { kind: "model" } });
+    const userPrompt = String(mockedCallModel.mock.calls[0]?.[1]);
+    expect(userPrompt).toContain("Sarah Jenkins");
+    expect(userPrompt).toContain("$2,450.00");
+    expect(userPrompt).not.toMatch(/James|Carter|Maple Ridge|1,850/);
+  });
+
+  it("falls back to the facts list when the model states a partial date", async () => {
+    mockedCallModel.mockResolvedValue({ text: "She owes $2,450.00 and the lease ends in 2027.", modelId: "m" });
+    const { result } = run("Is she behind, and when does the lease end?");
+    expect(await result).toMatchObject({ ok: true, outcome: "answered", answer: { kind: "model_discarded" } });
+  });
+});
+
+/* ---------- Panel: no stale answer after switching tenants ---------- */
+
+describe("TenantQaPanel on tenant switch", () => {
+  beforeEach(() => askMock.mockReset());
+
+  const sarahAnswer = {
+    ok: true,
+    outcome: "answered",
+    modelId: null,
+    answer: {
+      kind: "direct",
+      answer: "The current balance is $2,450.00.",
+      facts: [{ field: "balance_cents", label: "Current balance", value: "$2,450.00", raw: 245000 }],
+    },
+  };
+
+  const askQuestion = (q: string) => {
+    fireEvent.change(screen.getByLabelText("Question about this tenant"), { target: { value: q } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+  };
+
+  it("clears the question, answer and facts used when the tenant changes", async () => {
+    askMock.mockResolvedValue(sarahAnswer);
+    const view = render(createElement(TenantQaPanel, { tenant: sarah }));
+    askQuestion("What does Sarah owe?");
+    expect(await screen.findByText("The current balance is $2,450.00.")).toBeInTheDocument();
+    expect(screen.getByText("Facts used")).toBeInTheDocument();
+
+    view.rerender(createElement(TenantQaPanel, { tenant: james }));
+    expect(screen.queryByText("The current balance is $2,450.00.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Facts used")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Question about this tenant")).toHaveValue("");
+  });
+
+  it("drops an answer that arrives after the tenant changed", async () => {
+    let resolve: (v: unknown) => void = () => {};
+    askMock.mockReturnValue(new Promise((r) => (resolve = r)));
+    const view = render(createElement(TenantQaPanel, { tenant: sarah }));
+    askQuestion("What does Sarah owe?");
+
+    view.rerender(createElement(TenantQaPanel, { tenant: james }));
+    await act(async () => resolve(sarahAnswer));
+    expect(screen.queryByText("The current balance is $2,450.00.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ask" })).toBeDisabled(); // empty question, not "Asking…"
   });
 });
