@@ -319,7 +319,11 @@ export const decideDraft = createServerFn({ method: "POST" })
         status: data.decision === "approve" ? "approved" : "discarded",
         decided_at: new Date().toISOString(),
         decided_by: userId,
-        ...(edited && data.draft_body ? { draft_body: data.draft_body } : {}),
+        // The stored risk result describes the old words, so an edited approval is
+        // recorded as not risk-checked, exactly like a draft that was never checked.
+        ...(edited && data.draft_body
+          ? { draft_body: data.draft_body, risk_flags: null, risk_checked_at: null }
+          : {}),
       })
       .eq("id", data.draft_id)
       .eq("status", "pending")

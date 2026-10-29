@@ -269,6 +269,83 @@ describe("decideDraft — partial acknowledgment gate", () => {
   });
 });
 
+describe("decideDraft — edits at approval clear the stale risk result", () => {
+  const checked = {
+    risk_flags: { version: 1, status: "complete", checked_body: BODY },
+    risk_checked_at: "2026-10-29T12:00:00.000Z",
+  };
+  const draftUpdate = (ops: Op[]) =>
+    ops.find((o) => o.table === "copilot_drafts" && o.kind === "update")!.payload as Record<string, unknown>;
+
+  it("an edited approval ends with null risk_flags and null risk_checked_at", async () => {
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(checked) });
+    const editedBody = "Hi Sarah Jenkins, a gentle reminder that rent is due. Thank you.";
+
+    const updated = (await decideDraft({
+      data: { draft_id: DRAFT_ID, decision: "approve", draft_body: editedBody },
+      context: { supabase: client, userId: "u1" },
+    } as never)) as Record<string, unknown>;
+
+    const payload = draftUpdate(ops);
+    expect(payload).toMatchObject({ status: "approved", draft_body: editedBody, risk_flags: null, risk_checked_at: null });
+    expect(updated["risk_flags"]).toBeNull();
+    expect(updated["risk_checked_at"]).toBeNull();
+    const audit = ops.find((o) => o.table === "copilot_audit_log")!.payload as Record<string, unknown>;
+    expect(audit["action"]).toBe("approve");
+    expect((audit["detail"] as Record<string, unknown>)["edited"]).toBe(true);
+  });
+
+  it("an unedited approval keeps the stored risk result", async () => {
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(checked) });
+
+    await decideDraft({
+      data: { draft_id: DRAFT_ID, decision: "approve", draft_body: BODY },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    const payload = draftUpdate(ops);
+    expect("risk_flags" in payload).toBe(false);
+    expect("risk_checked_at" in payload).toBe(false);
+  });
+
+  it("an edited approval of a partial still needs the acknowledgment, then clears the result", async () => {
+    const partial = { risk_flags: { version: 1, status: "partial", checked_body: BODY }, risk_checked_at: checked.risk_checked_at };
+    const editedBody = "Hi Sarah Jenkins, rent is due on the 1st. Thank you.";
+
+    const first = fakeSupabase({ draft: pendingDraft(partial) });
+    await expect(
+      decideDraft({
+        data: { draft_id: DRAFT_ID, decision: "approve", draft_body: editedBody },
+        context: { supabase: first.client, userId: "u1" },
+      } as never),
+    ).rejects.toThrow(/language review did not run/i);
+    expect(first.ops).toHaveLength(0);
+
+    const second = fakeSupabase({ draft: pendingDraft(partial) });
+    await decideDraft({
+      data: { draft_id: DRAFT_ID, decision: "approve", draft_body: editedBody, partial_review_acknowledged: true },
+      context: { supabase: second.client, userId: "u1" },
+    } as never);
+    expect(draftUpdate(second.ops)).toMatchObject({ risk_flags: null, risk_checked_at: null });
+    const audit = second.ops.find((o) => o.table === "copilot_audit_log")!.payload as Record<string, unknown>;
+    expect(audit["action"]).toBe("approved_after_partial_review");
+  });
+
+  it("discard never touches the risk result", async () => {
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(checked) });
+
+    await decideDraft({
+      data: { draft_id: DRAFT_ID, decision: "discard", draft_body: "Something else entirely." },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+
+    const payload = draftUpdate(ops);
+    expect(payload["status"]).toBe("discarded");
+    expect("risk_flags" in payload).toBe(false);
+    expect("draft_body" in payload).toBe(false);
+  });
+});
+
 describe("draft language (compose flow)", () => {
   const prompts = () => mockedCallModel.mock.calls.map((c) => c[1] as string);
   const audits = (ops: Op[]) =>

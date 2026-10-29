@@ -41,7 +41,7 @@ vi.mock("./copilot-model.server", () => {
 });
 
 import { callModel, callSegmentation } from "./copilot-model.server";
-import { runPhotoTriage } from "./copilot-triage.functions";
+import { approveWorkOrder, runPhotoTriage, WORK_ORDER_COST_MESSAGE } from "./copilot-triage.functions";
 import { TRIAGE_FAILED_MESSAGE } from "./copilot-triage";
 
 const TENANT_ID = "00000000-0000-4000-8000-000000000002";
@@ -197,5 +197,80 @@ describe("runPhotoTriage — failed saves are never silent", () => {
     expect(await result).toEqual({ ok: false, error: TRIAGE_FAILED_MESSAGE });
     expect(markedFailed(ops)).toBe(true);
     expect(errorCode(audits(ops).find((a) => a["action"] === "model_error"))).toBe("audit_failed");
+  });
+});
+
+describe("approveWorkOrder — no cost can be added at approval", () => {
+  const STORED_BODY = "Inspect ceiling staining near the corner.";
+
+  function workOrderSupabase() {
+    const ops: Op[] = [];
+    const findings = { work_order: { body: STORED_BODY, status: "pending" } };
+    const client = {
+      from(table: string) {
+        let kind = "select";
+        const write = (k: string) => (p: Record<string, unknown>) => {
+          kind = k;
+          ops.push({ table, kind, payload: p });
+          return b;
+        };
+        const result = () => {
+          if (table === "copilot_photo_triage" && kind === "select") {
+            return { data: { id: TRIAGE_ID, tenant_id: TENANT_ID, findings }, error: null };
+          }
+          if (table === "copilot_photo_triage" && kind === "update") return { data: { id: TRIAGE_ID }, error: null };
+          return { data: null, error: null };
+        };
+        const b = {
+          select: () => b,
+          eq: () => b,
+          update: write("update"),
+          insert: write("insert"),
+          maybeSingle: async () => result(),
+          single: async () => result(),
+          then: (resolve: (v: unknown) => unknown) => Promise.resolve(result()).then(resolve),
+        };
+        return b;
+      },
+    };
+    return { client, ops };
+  }
+
+  const approve = (client: unknown, body: string) =>
+    (approveWorkOrder as unknown as (args: { data: unknown; context: unknown }) => Promise<unknown>)({
+      data: { triage_id: TRIAGE_ID, body },
+      context: { supabase: client, userId: "u1" },
+    });
+
+  it("refuses a body with a dollar amount and writes nothing", async () => {
+    const { client, ops } = workOrderSupabase();
+    await expect(approve(client, `${STORED_BODY} Should cost about $250.`)).rejects.toThrow(WORK_ORDER_COST_MESSAGE);
+    expect(WORK_ORDER_COST_MESSAGE).toMatch(/cannot include a cost estimate/i);
+    expect(ops).toHaveLength(0);
+  });
+
+  it("an unedited body approves as today", async () => {
+    const { client, ops } = workOrderSupabase();
+    await approve(client, STORED_BODY);
+    const update = ops.find((o) => o.table === "copilot_photo_triage" && o.kind === "update")!.payload as Record<
+      string,
+      unknown
+    >;
+    expect((update["findings"] as { work_order: Record<string, unknown> }).work_order).toMatchObject({
+      body: STORED_BODY,
+      status: "approved",
+    });
+    const rows = audits(ops);
+    expect(rows.map((a) => a["action"])).toEqual(["approve"]);
+    expect(rows[0]?.["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: false });
+  });
+
+  it("an edited body with no cost approves as today", async () => {
+    const { client, ops } = workOrderSupabase();
+    const edited = "Inspect ceiling staining near the corner of the bedroom.";
+    await approve(client, edited);
+    const rows = audits(ops);
+    expect(rows.map((a) => a["action"])).toEqual(["approve"]);
+    expect(rows[0]?.["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: true });
   });
 });
