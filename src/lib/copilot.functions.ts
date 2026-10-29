@@ -429,7 +429,7 @@ export const runRiskCheck = createServerFn({ method: "POST" })
     // Step 2: semantic pass — only the draft text and the category list go to the model.
     // Step 3: span verification — every quote must occur exactly once in the draft.
     let semantic: ReturnType<typeof verifySemanticFlags> | null = null;
-    let modelId: string;
+    let modelId: string | null;
     let failureCode: string | null = null;
     try {
       // Deterministic sampling, no reply-length cap (reasoning-style models can spend a
@@ -464,7 +464,7 @@ export const runRiskCheck = createServerFn({ method: "POST" })
           status: "complete",
           checked_body: body,
           checked_at: checkedAt,
-          model_id: modelId,
+          model_id: modelId ?? "",
           layers: [
             ...deterministic.layers,
             { check: "semantic", layer: "semantic", status: "ran" },
@@ -476,7 +476,7 @@ export const runRiskCheck = createServerFn({ method: "POST" })
           rejected_quote_count: semantic.rejected,
           malformed_flag_count: semantic.malformed,
         }
-      : buildPartialRiskResult({ body, checkedAt, modelId, deterministic });
+      : buildPartialRiskResult({ body, checkedAt, modelId: modelId ?? "not_configured", deterministic });
 
     const { data: updated, error: updateError } = await supabase
       .from("copilot_drafts")
