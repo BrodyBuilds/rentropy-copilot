@@ -177,3 +177,99 @@ describe("model answer verification", () => {
     expect(fb.answer).toContain("February 28, 2027");
   });
 });
+
+/* ---------- Fixes: scope names, rent topic, full dates, tenant switch ---------- */
+
+describe("cross-scope refusal uses every demo tenant's name, in any case", () => {
+  const others = ["James Carter"];
+
+  it("refuses a fully lowercase question naming the other tenant", () => {
+    expect(planAnswer("what does james carter owe?", sarah, others)).toEqual({
+      kind: "refused",
+      message: CROSS_SCOPE_MESSAGE,
+    });
+  });
+
+  it("refuses a lowercase first name or last name on its own", () => {
+    expect(planAnswer("is james behind on rent?", sarah, others).kind).toBe("refused");
+    expect(planAnswer("what's carter's balance", sarah, others).kind).toBe("refused");
+  });
+
+  it("refuses the capitalised form exactly the same way", () => {
+    expect(planAnswer("What does James Carter owe?", sarah, others)).toEqual(
+      planAnswer("what does james carter owe?", sarah, others),
+    );
+  });
+
+  it("still answers lowercase questions about the page tenant", () => {
+    expect(planAnswer("what does sarah owe?", sarah, others).kind).toBe("answered");
+    expect(planAnswer("what does james owe?", james, ["Sarah Jenkins"]).kind).toBe("answered");
+  });
+});
+
+describe("rent is kept alongside other asked topics", () => {
+  it("rent and balance: both halves go to the answer path", () => {
+    const plan = planAnswer("What is her rent and balance?", sarah);
+    expect(plan.kind).toBe("needs_model");
+    if (plan.kind !== "needs_model") return;
+    expect(plan.topics).toEqual(["balance", "rent"]);
+    expect(fields(plan.facts)).toEqual([
+      ["full_name", "Sarah Jenkins"],
+      ["balance_cents", 245000],
+      ["rent_cents", 245000],
+    ]);
+  });
+
+  it("rent and late fee keeps rent too", () => {
+    const plan = planAnswer("what's the rent and the late fee?", james);
+    expect(plan.kind === "needs_model" && plan.topics).toEqual(["rent", "late_fee"]);
+  });
+
+  it("rent that only describes another topic is not added", () => {
+    expect(answered(planAnswer("When is rent due?", sarah)).facts.map((f) => f.field)).toEqual(["due_day"]);
+    expect(answered(planAnswer("Is she behind on rent?", sarah)).facts.map((f) => f.field)).toEqual([
+      "balance_cents",
+    ]);
+  });
+
+  it("every amount in a rent-and-balance answer is still verified", () => {
+    const plan = planAnswer("What is his rent and balance?", james);
+    const facts = plan.kind === "needs_model" ? plan.facts : [];
+    expect(verifyModelAnswer("His rent is $1,850.00 and his balance is $0.00.", facts).ok).toBe(true);
+    const bad = verifyModelAnswer("His rent is $1,850.00 and his balance is $1,850.50.", facts);
+    expect(bad).toEqual({ ok: false, mismatches: ["$1,850.50"] });
+    const fb = fallbackAnswer(facts);
+    expect(fb.answer).toContain("$1,850.00");
+    expect(fb.answer).toContain("$0.00");
+  });
+});
+
+describe("dates verify only as full stored dates", () => {
+  const plan = planAnswer("Is she behind, and when does the lease end?", sarah);
+  const facts = plan.kind === "needs_model" ? plan.facts : [];
+
+  it("a full matching date verifies", () => {
+    expect(verifyModelAnswer("Her lease ends February 28, 2027.", facts).ok).toBe(true);
+    expect(verifyModelAnswer("Her lease ends 2027-02-28.", facts).ok).toBe(true);
+  });
+
+  it("a bare year does not verify", () => {
+    expect(verifyModelAnswer("Her lease ends in 2027.", facts)).toEqual({ ok: false, mismatches: ["2027"] });
+  });
+
+  it("a bare month does not verify", () => {
+    expect(verifyModelAnswer("Her lease ends in February.", facts)).toEqual({
+      ok: false,
+      mismatches: ["February"],
+    });
+  });
+
+  it("a month and year that share parts with a stored date do not verify", () => {
+    expect(verifyModelAnswer("Her lease ends February 2027.", facts).ok).toBe(false);
+    expect(verifyModelAnswer("Her lease ends February 28.", facts).ok).toBe(false);
+  });
+
+  it("'may' as a verb is not read as a date", () => {
+    expect(verifyModelAnswer("She may owe $2,450.00; her lease ends February 28, 2027.", facts).ok).toBe(true);
+  });
+});
