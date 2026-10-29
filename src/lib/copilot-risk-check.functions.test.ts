@@ -19,6 +19,12 @@ vi.mock("@tanstack/react-start", () => ({
   },
 }));
 vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
+// The server-only admin client: each test points it at the same recording stand-in,
+// tagged "admin", so tests can prove which client made every write.
+const admin = vi.hoisted(() => ({ client: null as unknown as { from: (table: string) => unknown } }));
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: { from: (table: string) => admin.client.from(table) },
+}));
 vi.mock("./copilot-model.server", () => {
   class ModelCallError extends Error {
     constructor(
@@ -63,7 +69,7 @@ const sarah = {
   possession_date: null,
 };
 
-type Op = { table: string; kind: string; payload?: unknown };
+type Op = { table: string; kind: string; payload?: unknown; via: "user" | "admin" };
 
 /** A tiny stand-in for the Supabase client that records writes. */
 function fakeSupabase(opts: {
@@ -73,7 +79,7 @@ function fakeSupabase(opts: {
   failAuditActions?: string[];
 }) {
   const ops: Op[] = [];
-  const client = {
+  const makeClient = (via: Op["via"]) => ({
     from(table: string) {
       let kind = "select";
       let payload: unknown;
@@ -106,13 +112,13 @@ function fakeSupabase(opts: {
         update: (p: unknown) => {
           kind = "update";
           payload = p;
-          ops.push({ table, kind, payload: p });
+          ops.push({ table, kind, payload: p, via });
           return b;
         },
         insert: (p: unknown) => {
           kind = "insert";
           payload = p;
-          ops.push({ table, kind, payload: p });
+          ops.push({ table, kind, payload: p, via });
           return b;
         },
         maybeSingle: async () => result(),
@@ -121,7 +127,9 @@ function fakeSupabase(opts: {
       };
       return b;
     },
-  };
+  });
+  const client = makeClient("user");
+  admin.client = makeClient("admin");
   return { client, ops };
 }
 
@@ -515,5 +523,53 @@ describe("failed audit inserts are never reported as success", () => {
     expect(ops.filter((o) => o.table === "copilot_audit_log").map((o) => (o.payload as { action: string }).action)).toEqual([
       "model_error",
     ]);
+  });
+});
+
+describe("drafts are written only by the server", () => {
+  const draftWrites = (ops: Op[]) => ops.filter((o) => o.table === "copilot_drafts" && o.kind !== "select");
+  const auditVias = (ops: Op[]) => ops.filter((o) => o.table === "copilot_audit_log").map((o) => o.via);
+
+  it("generating a draft inserts it through the admin client; the audit row stays on the user's access", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Hi Sarah", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+    expect(res.ok).toBe(true);
+    expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["insert", "admin"]]);
+    expect(auditVias(ops)).toEqual(["user"]);
+  });
+
+  it("approve and discard update the draft through the admin client", async () => {
+    for (const decision of ["approve", "discard"] as const) {
+      const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+      await decideDraft({ data: { draft_id: DRAFT_ID, decision }, context: { supabase: client, userId: "u1" } } as never);
+      expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["update", "admin"]]);
+      expect(auditVias(ops)).toEqual(["user"]);
+    }
+  });
+
+  it("the partial-review gate still refuses before any admin write", async () => {
+    const { client, ops } = fakeSupabase({
+      draft: pendingDraft({ risk_flags: { version: 1, status: "partial", checked_body: BODY } }),
+    });
+    await expect(
+      decideDraft({ data: { draft_id: DRAFT_ID, decision: "approve" }, context: { supabase: client, userId: "u1" } } as never),
+    ).rejects.toThrow();
+    expect(ops).toHaveLength(0);
+  });
+
+  it("the risk check saves its result through the admin client", async () => {
+    mockedCallModel.mockResolvedValue({ text: "[]", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+    const res = await runRiskCheck({
+      data: { draft_id: DRAFT_ID, draft_body: BODY },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+    expect(res.ok).toBe(true);
+    expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["update", "admin"]]);
+    expect(auditVias(ops)).toEqual(["user"]);
   });
 });
