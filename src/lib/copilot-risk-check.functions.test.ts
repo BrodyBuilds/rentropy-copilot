@@ -19,6 +19,12 @@ vi.mock("@tanstack/react-start", () => ({
   },
 }));
 vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
+// The server-only admin client: each test points it at the same recording stand-in,
+// tagged "admin", so tests can prove which client made every write.
+const admin = vi.hoisted(() => ({ client: null as unknown as { from: (table: string) => unknown } }));
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: { from: (table: string) => admin.client.from(table) },
+}));
 vi.mock("./copilot-model.server", () => {
   class ModelCallError extends Error {
     constructor(
@@ -63,7 +69,7 @@ const sarah = {
   possession_date: null,
 };
 
-type Op = { table: string; kind: string; payload?: unknown };
+type Op = { table: string; kind: string; payload?: unknown; via: "user" | "admin" };
 
 /** A tiny stand-in for the Supabase client that records writes. */
 function fakeSupabase(opts: {
@@ -73,7 +79,7 @@ function fakeSupabase(opts: {
   failAuditActions?: string[];
 }) {
   const ops: Op[] = [];
-  const client = {
+  const makeClient = (via: Op["via"]) => ({
     from(table: string) {
       let kind = "select";
       let payload: unknown;
@@ -106,13 +112,13 @@ function fakeSupabase(opts: {
         update: (p: unknown) => {
           kind = "update";
           payload = p;
-          ops.push({ table, kind, payload: p });
+          ops.push({ table, kind, payload: p, via });
           return b;
         },
         insert: (p: unknown) => {
           kind = "insert";
           payload = p;
-          ops.push({ table, kind, payload: p });
+          ops.push({ table, kind, payload: p, via });
           return b;
         },
         maybeSingle: async () => result(),
@@ -121,7 +127,9 @@ function fakeSupabase(opts: {
       };
       return b;
     },
-  };
+  });
+  const client = makeClient("user");
+  admin.client = makeClient("admin");
   return { client, ops };
 }
 

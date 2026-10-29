@@ -20,6 +20,12 @@ vi.mock("@tanstack/react-start", () => ({
   },
 }));
 vi.mock("@/integrations/supabase/auth-middleware", () => ({ requireSupabaseAuth: {} }));
+// The server-only admin client: each test points it at the same recording stand-in,
+// tagged "admin", so tests can prove which client made every write.
+const admin = vi.hoisted(() => ({ client: null as unknown as { from: (table: string) => unknown } }));
+vi.mock("@/integrations/supabase/client.server", () => ({
+  supabaseAdmin: { from: (table: string) => admin.client.from(table) },
+}));
 vi.mock("./copilot-model.server", () => {
   class ModelCallError extends Error {
     constructor(
@@ -48,7 +54,7 @@ const TENANT_ID = "00000000-0000-4000-8000-000000000002";
 const TRIAGE_ID = "22222222-2222-4222-8222-222222222222";
 const DRAFT_ID = "33333333-3333-4333-8333-333333333333";
 
-type Op = { table: string; kind: string; payload?: unknown };
+type Op = { table: string; kind: string; payload?: unknown; via: "user" | "admin" };
 type Failures = {
   /** Fail a copilot_photo_triage update whose payload has this key ("segmentation" | "findings"). */
   triageUpdateKey?: string;
@@ -60,7 +66,7 @@ type Failures = {
 function fakeSupabase(fail: Failures = {}) {
   const ops: Op[] = [];
   const err = { message: "write failed" };
-  const client = {
+  const makeClient = (via: Op["via"]) => ({
     storage: {
       from: () => ({
         upload: async () => ({ data: { path: "p" }, error: null }),
@@ -92,7 +98,7 @@ function fakeSupabase(fail: Failures = {}) {
       const write = (k: string) => (p: Record<string, unknown>) => {
         kind = k;
         payload = p;
-        ops.push({ table, kind, payload: p });
+        ops.push({ table, kind, payload: p, via });
         return b;
       };
       const b = {
@@ -106,7 +112,9 @@ function fakeSupabase(fail: Failures = {}) {
       };
       return b;
     },
-  };
+  });
+  const client = makeClient("user");
+  admin.client = makeClient("admin");
   return { client, ops };
 }
 
@@ -206,12 +214,12 @@ describe("approveWorkOrder — no cost can be added at approval", () => {
   function workOrderSupabase() {
     const ops: Op[] = [];
     const findings = { work_order: { body: STORED_BODY, status: "pending" } };
-    const client = {
+    const makeClient = (via: Op["via"]) => ({
       from(table: string) {
         let kind = "select";
         const write = (k: string) => (p: Record<string, unknown>) => {
           kind = k;
-          ops.push({ table, kind, payload: p });
+          ops.push({ table, kind, payload: p, via });
           return b;
         };
         const result = () => {
@@ -232,7 +240,9 @@ describe("approveWorkOrder — no cost can be added at approval", () => {
         };
         return b;
       },
-    };
+    });
+    const client = makeClient("user");
+    admin.client = makeClient("admin");
     return { client, ops };
   }
 
