@@ -383,8 +383,12 @@ const RECORD_CONTENTS =
  * Decides, in code, how a question is answered. Only `needs_model` results
  * go to the model, and then only with the facts listed in the plan.
  */
-export function planAnswer(question: string, tenant: TenantRecord): QaPlan {
-  if (isCrossScope(question, tenant)) return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
+export function planAnswer(
+  question: string,
+  tenant: TenantRecord,
+  otherTenantNames: readonly string[] = [],
+): QaPlan {
+  if (isCrossScope(question, tenant, otherTenantNames)) return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
 
   const missing = detectMissing(question);
   const topics = detectTopics(question, missing);
@@ -501,6 +505,15 @@ export function findDates(text: string): DateMention[] {
   });
   add(new RegExp(`\\b${MON}\\.?,?\\s+(\\d{4})\\b`, "gi"), (m) => ({ m: month(m[1]), y: num(m[2]) }));
   add(/\b((?:19|20)\d{2})\b/g, (m) => ({ y: num(m[1]) }));
+  // A bare month ("in February"). "May" only counts after a date word, since it is also a verb;
+  // abbreviations only count capitalised, since "mar" and "dec" can be ordinary words.
+  add(/\b(january|february|march|april|june|july|august|september|october|november|december)\b/gi, (m) => ({
+    m: month(m[1]),
+  }));
+  add(/\b(?:in|of|by|since|until|till|before|after|from|through|during|early|late|mid|end of)\s+(May)\b/g, (m) => ({
+    m: month(m[1]),
+  }));
+  add(/\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\b\.?/g, (m) => ({ m: month(m[1]) }));
   add(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, (m) => ({ d: num(m[1]) }));
   add(RELATIVE_DATE, () => ({}));
   return out.sort((a, b) => a.start - b.start);
@@ -528,15 +541,11 @@ export function verifyModelAnswer(answer: string, facts: QaFact[]): { ok: boolea
     if (!cents.has(money.cents)) mismatches.push(money.text);
   }
   for (const date of findDates(answer)) {
-    const stated = date.y !== undefined || date.m !== undefined || date.d !== undefined;
-    const matchesRowDate =
-      stated &&
-      dates.some(
-        (r) =>
-          (date.y === undefined || date.y === r.y) &&
-          (date.m === undefined || date.m === r.m) &&
-          (date.d === undefined || date.d === r.d),
-      );
+    // Only a full date (year, month and day) can verify, and only against the
+    // whole stored date. A bare year, bare month, or month-and-year that merely
+    // shares a part with a stored date is a mismatch.
+    const full = date.y !== undefined && date.m !== undefined && date.d !== undefined;
+    const matchesRowDate = full && dates.some((r) => date.y === r.y && date.m === r.m && date.d === r.d);
     const isDueDay =
       date.y === undefined && date.m === undefined && date.d !== undefined && dueDay !== undefined && date.d === Number(dueDay.raw);
     if (!matchesRowDate && !isDueDay) mismatches.push(date.text);
