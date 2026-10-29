@@ -6,13 +6,13 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import {
-  CleanRun,
-  FlagCard,
-  HighlightedDraft,
-  NeutralNote,
+  PartialAcknowledgment,
+  RiskResults,
   WarningBanner,
   allFlags,
-  layersThatRan,
+  approvalGate,
+  isPartialResult,
+  readStoredRisk,
 } from "@/components/risk-check";
 import { TenantQaPanel } from "@/components/tenant-qa-panel";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,10 @@ import {
   runRiskCheck,
   RISK_CHECK_FAILED_MESSAGE,
   type DraftRow,
+  type StoredRiskResult,
 } from "@/lib/copilot.functions";
-import { applySuggestion, CHECK_LABELS, type RiskFlag, type RiskResult } from "@/lib/copilot-risk";
+import type { Json } from "@/integrations/supabase/types";
+import { applySuggestion, type RiskFlag } from "@/lib/copilot-risk";
 import {
   MESSAGE_TYPES,
   TONES,
@@ -89,11 +91,12 @@ function ComposePage() {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [body, setBody] = useState("");
   const [deciding, setDeciding] = useState<"approve" | "discard" | null>(null);
-  const [risk, setRisk] = useState<RiskResult | null>(null);
+  const [risk, setRisk] = useState<StoredRiskResult | null>(null);
   const [riskError, setRiskError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [confirmHigh, setConfirmHigh] = useState(false);
+  const [partialAck, setPartialAck] = useState(false);
 
   const { draft: draftParam } = Route.useSearch();
   const linkedDraft = useQuery({
@@ -113,11 +116,11 @@ function ComposePage() {
     setDraft(d);
     setBody(d.draft_body);
     setFacts(type ? buildFacts(tenant, type) : []);
-    const stored = d.risk_flags as unknown as RiskResult | null;
-    setRisk(stored && stored.version === 1 && d.risk_checked_at ? stored : null);
+    setRisk(d.risk_checked_at ? readStoredRisk(d.risk_flags) : null);
     setRiskError(null);
     setAppliedIds(new Set());
     setConfirmHigh(false);
+    setPartialAck(false);
   }, [linkedDraft.data, tenant, seededFor]);
 
   if (!tenant) return null;
@@ -150,6 +153,7 @@ function ComposePage() {
     setRiskError(null);
     setAppliedIds(new Set());
     setConfirmHigh(false);
+    setPartialAck(false);
   }
 
   function updateBody(next: string) {
@@ -161,6 +165,7 @@ function ComposePage() {
     if (!draft) return;
     setChecking(true);
     setConfirmHigh(false);
+    setPartialAck(false);
     try {
       const res = await riskCheck({ data: { draft_id: draft.id, draft_body: body } });
       if (!res.ok) {
@@ -172,7 +177,11 @@ function ComposePage() {
       setRisk(res.result);
       setRiskError(null);
       setAppliedIds(new Set());
-      setDraft({ ...draft, risk_checked_at: res.riskCheckedAt });
+      setDraft({
+        ...draft,
+        risk_flags: res.result as unknown as Json,
+        risk_checked_at: res.riskCheckedAt,
+      });
     } catch (e) {
       console.error(e);
       setRisk(null);
@@ -192,9 +201,12 @@ function ComposePage() {
 
   async function runDecision(decision: "approve" | "discard") {
     if (!draft) return;
-    if (decision === "approve" && highCount > 0 && !confirmHigh) {
-      setConfirmHigh(true);
-      return;
+    if (decision === "approve") {
+      if (!gate.approveEnabled) return;
+      if (gate.needsHighConfirm) {
+        setConfirmHigh(true);
+        return;
+      }
     }
     setDeciding(decision);
     try {
@@ -203,11 +215,13 @@ function ComposePage() {
           draft_id: draft.id,
           decision,
           ...(decision === "approve" ? { draft_body: body } : {}),
+          ...(decision === "approve" && partial ? { partial_review_acknowledged: partialAck } : {}),
         },
       });
       setDraft(updated);
       setBody(updated.draft_body);
       setConfirmHigh(false);
+      setPartialAck(false);
       toast.success(decision === "approve" ? "Draft approved" : "Draft discarded");
     } catch (e) {
       console.error(e);
@@ -235,9 +249,14 @@ function ComposePage() {
   const highCount = flags.filter((f) => f.severity === "high").length;
   const stale = risk !== null && body !== risk.checked_body;
   const neverChecked = !risk && !riskError && !draft?.risk_checked_at;
-  const notDeterminableLayers = risk
-    ? risk.layers.filter((l) => l.status === "not_determinable").map((l) => CHECK_LABELS[l.check])
-    : [];
+  // Branch on the stored status only: a partial is never a pass, whatever its flag count.
+  const partial = risk?.status === "partial" || isPartialResult(draft?.risk_flags);
+  const gate = approvalGate({
+    partial,
+    partialAcknowledged: partialAck,
+    highCount,
+    highConfirmed: confirmHigh,
+  });
 
   return (
     <div>
@@ -322,7 +341,9 @@ function ComposePage() {
                 <>
                   <Button
                     onClick={() => runDecision("approve")}
-                    disabled={deciding !== null || checking || body.trim() === ""}
+                    disabled={
+                      deciding !== null || checking || body.trim() === "" || !gate.approveEnabled
+                    }
                   >
                     {deciding === "approve"
                       ? "Approving…"
@@ -341,6 +362,7 @@ function ComposePage() {
                     neverChecked={neverChecked}
                     failed={riskError !== null}
                     stale={stale}
+                    partial={partial}
                     flagCount={flags.length}
                     highCount={highCount}
                   />
@@ -358,6 +380,14 @@ function ComposePage() {
               )}
             </div>
 
+            {isPending && partial && (
+              <PartialAcknowledgment
+                checked={partialAck}
+                onChange={setPartialAck}
+                disabled={deciding !== null}
+              />
+            )}
+
             {isPending && confirmHigh && (
               <p className="mt-3 flex items-center gap-2 text-sm text-destructive" role="alert">
                 <AlertTriangle className="h-4 w-4" />
@@ -371,7 +401,7 @@ function ComposePage() {
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
                   <ShieldCheck className="h-4 w-4" /> Risk check
                 </h3>
-                {isPending && (
+                {isPending && !(risk && risk.status === "partial") && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -391,48 +421,16 @@ function ComposePage() {
                   </p>
                 )}
                 {risk && (
-                  <>
-                    {stale && (
-                      <WarningBanner>
-                        Draft changed since the check — run the risk check again
-                      </WarningBanner>
-                    )}
-                    {flags.length === 0 ? (
-                      <CleanRun result={risk} />
-                    ) : (
-                      <>
-                        <HighlightedDraft body={body} result={risk} flags={flags} />
-                        <ol className="space-y-3">
-                          {flags.map((f, i) => (
-                            <FlagCard
-                              key={f.id}
-                              flag={f}
-                              n={i + 1}
-                              body={body}
-                              result={risk}
-                              canApply={isPending}
-                              applied={appliedIds.has(f.id)}
-                              onApply={() => applyFlag(f)}
-                            />
-                          ))}
-                        </ol>
-                      </>
-                    )}
-                    {risk.not_determinable.map((nd) => (
-                      <NeutralNote key={nd.check} title={nd.title} detail={nd.detail} />
-                    ))}
-                    {risk.info.map((info) => (
-                      <NeutralNote key={info.check} title={info.title} detail={info.detail} />
-                    ))}
-                    <p className="text-xs text-muted-foreground">
-                      Checks that ran: {layersThatRan(risk).join(", ")}.
-                      {notDeterminableLayers.length > 0 &&
-                        ` Not determinable: ${notDeterminableLayers.join(", ")}.`}
-                      {risk.rejected_quote_count > 0 &&
-                        ` ${risk.rejected_quote_count} AI flag${risk.rejected_quote_count === 1 ? " was" : "s were"} dropped because the quoted text didn't match the draft exactly once.`}
-                      {" "}The check informs; you decide.
-                    </p>
-                  </>
+                  <RiskResults
+                    risk={risk}
+                    body={body}
+                    isPending={isPending}
+                    appliedIds={appliedIds}
+                    onApply={applyFlag}
+                    onRetry={runRisk}
+                    retryDisabled={checking || deciding !== null || body.trim() === ""}
+                    checking={checking}
+                  />
                 )}
               </div>
             </div>
@@ -467,12 +465,14 @@ function RiskStatus({
   neverChecked,
   failed,
   stale,
+  partial,
   flagCount,
   highCount,
 }: {
   neverChecked: boolean;
   failed: boolean;
   stale: boolean;
+  partial: boolean;
   flagCount: number;
   highCount: number;
 }) {
@@ -486,6 +486,9 @@ function RiskStatus({
   } else if (stale) {
     text = "Draft changed since the check";
     tone = "warn";
+  } else if (partial) {
+    text = `Incomplete — language review did not run${highCount ? ` · ${highCount} high` : ""}`;
+    tone = highCount ? "bad" : "warn";
   } else if (flagCount === 0) {
     text = "No flags from the checks that ran";
   } else {

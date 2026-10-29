@@ -12,6 +12,8 @@ import {
   RISK_REVIEW_SYSTEM_PROMPT,
   runDeterministicChecks,
   verifySemanticFlags,
+  type LayerRun,
+  type RiskInfo,
   type RiskResult,
 } from "./copilot-risk";
 import {
@@ -229,6 +231,9 @@ export const copilotDraft = createServerFn({ method: "POST" })
 
 /* ---------- Approve / discard ---------- */
 
+export const PARTIAL_ACK_REQUIRED_MESSAGE =
+  "The language review did not run. Confirm you reviewed this draft yourself before approving.";
+
 export const decideDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
@@ -237,6 +242,8 @@ export const decideDraft = createServerFn({ method: "POST" })
         draft_id: z.string().uuid(),
         decision: z.enum(["approve", "discard"]),
         draft_body: z.string().trim().min(1).max(5000).optional(),
+        // Required to approve a draft whose stored risk result is partial.
+        partial_review_acknowledged: z.boolean().optional(),
       })
       .parse(input),
   )
@@ -245,12 +252,17 @@ export const decideDraft = createServerFn({ method: "POST" })
 
     const { data: current, error: readError } = await supabase
       .from("copilot_drafts")
-      .select("id, tenant_id, status, draft_body")
+      .select("id, tenant_id, status, draft_body, risk_flags")
       .eq("id", data.draft_id)
       .maybeSingle();
     if (readError) throw new Error("Could not load draft");
     if (!current) throw new Error("Draft not found");
     if (current.status !== "pending") throw new Error("This draft has already been decided");
+
+    const approvingPartial = data.decision === "approve" && isPartialRiskResult(current.risk_flags);
+    if (approvingPartial && data.partial_review_acknowledged !== true) {
+      throw new Error(PARTIAL_ACK_REQUIRED_MESSAGE);
+    }
 
     const edited =
       data.decision === "approve" &&
@@ -272,13 +284,27 @@ export const decideDraft = createServerFn({ method: "POST" })
     if (updateError) throw new Error("Could not update draft");
     if (!updated) throw new Error("This draft has already been decided");
 
-    await supabase.from("copilot_audit_log").insert({
-      draft_id: updated.id,
-      tenant_id: updated.tenant_id,
-      action: data.decision,
-      model_id: null,
-      detail: { edited },
-    });
+    await supabase.from("copilot_audit_log").insert(
+      approvingPartial
+        ? {
+            draft_id: updated.id,
+            tenant_id: updated.tenant_id,
+            action: "approved_after_partial_review",
+            model_id: null,
+            detail: {
+              edited,
+              partial_review_acknowledged: true,
+              summary: "Approved after the landlord confirmed a manual review — language review did not run",
+            },
+          }
+        : {
+            draft_id: updated.id,
+            tenant_id: updated.tenant_id,
+            action: data.decision,
+            model_id: null,
+            detail: { edited },
+          },
+    );
 
     return updated;
   });
@@ -287,8 +313,62 @@ export const decideDraft = createServerFn({ method: "POST" })
 
 export const RISK_CHECK_FAILED_MESSAGE = "Risk check couldn't run — review carefully";
 
+/** Per-call options for the language review only; every other call keeps the adapter default. */
+export const RISK_REVIEW_CALL_OPTIONS = { temperature: 0, timeoutMs: 60_000 } as const;
+
+/** "complete" = rule checks and language review both ran; "partial" = rule checks only. */
+export type RiskCheckStatus = "complete" | "partial";
+export type StoredLayerRun = Omit<LayerRun, "status"> & { status: LayerRun["status"] | "not_run" };
+/** What is stored in copilot_drafts.risk_flags. Results saved before `status` existed were complete. */
+export type StoredRiskResult = Omit<RiskResult, "layers"> & {
+  status: RiskCheckStatus;
+  layers: StoredLayerRun[];
+};
+
+export const LANGUAGE_REVIEW_NOT_RUN_INFO = {
+  check: "semantic",
+  title: "Language review could not run",
+  detail:
+    "The AI language review didn't finish, so only the rule checks ran. Read the draft yourself for threatening, discriminatory, retaliatory or otherwise risky wording before approving.",
+} as const satisfies RiskInfo;
+
+export function isPartialRiskResult(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { status?: unknown }).status === "partial"
+  );
+}
+
+/** A risk result built from the rule checks alone, used when the language review fails. */
+export function buildPartialRiskResult(args: {
+  body: string;
+  checkedAt: string;
+  modelId: string;
+  deterministic: ReturnType<typeof runDeterministicChecks>;
+}): StoredRiskResult {
+  return {
+    version: 1,
+    status: "partial",
+    checked_body: args.body,
+    checked_at: args.checkedAt,
+    model_id: args.modelId,
+    layers: [
+      ...args.deterministic.layers,
+      { check: "semantic", layer: "semantic", status: "not_run" },
+    ],
+    deterministic_flags: args.deterministic.flags,
+    semantic_flags: [],
+    not_determinable: args.deterministic.notDeterminable,
+    info: [...args.deterministic.info, { ...LANGUAGE_REVIEW_NOT_RUN_INFO }],
+    rejected_quote_count: 0,
+    malformed_flag_count: 0,
+  };
+}
+
 export type RiskCheckResult =
-  | { ok: true; result: RiskResult; riskCheckedAt: string }
+  | { ok: true; result: StoredRiskResult; riskCheckedAt: string }
   | { ok: false; error: string };
 
 /** Today's date (YYYY-MM-DD) in North Carolina's time zone. */
@@ -348,55 +428,55 @@ export const runRiskCheck = createServerFn({ method: "POST" })
 
     // Step 2: semantic pass — only the draft text and the category list go to the model.
     // Step 3: span verification — every quote must occur exactly once in the draft.
-    let semantic: ReturnType<typeof verifySemanticFlags>;
-    let modelId: string;
+    let semantic: ReturnType<typeof verifySemanticFlags> | null = null;
+    let modelId: string | null;
+    let failureCode: string | null = null;
     try {
-      const reply = await callModel(RISK_REVIEW_SYSTEM_PROMPT, buildRiskReviewInput(body), {
-        // Fast, low-effort: deterministic sampling. No reply-length cap, because
-        // reasoning-style models can spend a cap before writing any output.
-        temperature: 0,
-      });
+      // Deterministic sampling, no reply-length cap (reasoning-style models can spend a
+      // cap before writing any output), and a longer timeout for this one call only.
+      const reply = await callModel(
+        RISK_REVIEW_SYSTEM_PROMPT,
+        buildRiskReviewInput(body),
+        { ...RISK_REVIEW_CALL_OPTIONS },
+      );
       const items = parseJsonArray(reply.text);
       if (!items) throw new ModelCallError("Model reply was not a JSON array", reply.modelId, "invalid_output");
       semantic = verifySemanticFlags(items, body);
       modelId = reply.modelId;
     } catch (error) {
-      const failedModel = error instanceof ModelCallError ? error.modelId : configuredModelId();
-      const code = error instanceof ModelCallError ? error.code : "unknown";
-      // A check that did not run must never look like one that passed: clear any stored result.
-      await supabase
-        .from("copilot_drafts")
-        .update({ risk_flags: null, risk_checked_at: null })
-        .eq("id", draft.id)
-        .eq("status", "pending");
+      modelId = error instanceof ModelCallError ? error.modelId : configuredModelId();
+      failureCode = error instanceof ModelCallError ? error.code : "unknown";
       await supabase.from("copilot_audit_log").insert({
         draft_id: draft.id,
         tenant_id: draft.tenant_id,
         action: "model_error",
-        model_id: failedModel,
-        detail: { stage: "risk_check", error_code: code },
+        model_id: modelId,
+        detail: { stage: "risk_check", error_code: failureCode },
       });
-      return { ok: false, error: RISK_CHECK_FAILED_MESSAGE };
     }
 
-    // Step 4: store everything on the draft and audit the counts.
+    // Step 4: store everything on the draft and audit the counts. When the language
+    // review failed, the rule-check results are kept as an explicitly partial result.
     const checkedAt = new Date().toISOString();
-    const result: RiskResult = {
-      version: 1,
-      checked_body: body,
-      checked_at: checkedAt,
-      model_id: modelId,
-      layers: [
-        ...deterministic.layers,
-        { check: "semantic", layer: "semantic", status: "ran" },
-      ],
-      deterministic_flags: deterministic.flags,
-      semantic_flags: semantic.flags,
-      not_determinable: deterministic.notDeterminable,
-      info: deterministic.info,
-      rejected_quote_count: semantic.rejected,
-      malformed_flag_count: semantic.malformed,
-    };
+    const result: StoredRiskResult = semantic
+      ? {
+          version: 1,
+          status: "complete",
+          checked_body: body,
+          checked_at: checkedAt,
+          model_id: modelId ?? "",
+          layers: [
+            ...deterministic.layers,
+            { check: "semantic", layer: "semantic", status: "ran" },
+          ],
+          deterministic_flags: deterministic.flags,
+          semantic_flags: semantic.flags,
+          not_determinable: deterministic.notDeterminable,
+          info: deterministic.info,
+          rejected_quote_count: semantic.rejected,
+          malformed_flag_count: semantic.malformed,
+        }
+      : buildPartialRiskResult({ body, checkedAt, modelId: modelId ?? "not_configured", deterministic });
 
     const { data: updated, error: updateError } = await supabase
       .from("copilot_drafts")
@@ -407,26 +487,55 @@ export const runRiskCheck = createServerFn({ method: "POST" })
       .maybeSingle();
     if (updateError) {
       console.error("[copilot] risk result save failed", updateError);
+      if (result.status === "partial") {
+        // Nothing usable was saved: never leave an older result looking current.
+        await supabase
+          .from("copilot_drafts")
+          .update({ risk_flags: null, risk_checked_at: null })
+          .eq("id", draft.id)
+          .eq("status", "pending");
+      }
       return { ok: false, error: RISK_CHECK_FAILED_MESSAGE };
     }
     if (!updated) return { ok: false, error: "This draft has already been decided." };
 
     const allFlags = [...result.deterministic_flags, ...result.semantic_flags];
-    await supabase.from("copilot_audit_log").insert({
-      draft_id: draft.id,
-      tenant_id: draft.tenant_id,
-      action: "risk_check",
-      model_id: modelId,
-      detail: {
-        layers: result.layers.map((l) => `${l.check}:${l.status}`),
-        deterministic_flags: result.deterministic_flags.length,
-        semantic_flags: result.semantic_flags.length,
-        high_severity_flags: allFlags.filter((f) => f.severity === "high").length,
-        not_determinable: result.not_determinable.length,
-        rejected_quotes: result.rejected_quote_count,
-        malformed_flags: result.malformed_flag_count,
-      },
-    });
+    const highCount = allFlags.filter((f) => f.severity === "high").length;
+    if (result.status === "partial") {
+      const det = result.deterministic_flags.length;
+      await supabase.from("copilot_audit_log").insert({
+        draft_id: draft.id,
+        tenant_id: draft.tenant_id,
+        action: "risk_check",
+        model_id: null,
+        detail: {
+          status: "partial",
+          partial_preserved: true,
+          summary: `Partial — rule checks only · ${det} rule flag${det === 1 ? "" : "s"} · language review did not run`,
+          layers: result.layers.map((l) => `${l.check}:${l.status}`),
+          deterministic_flags: det,
+          high_severity_flags: highCount,
+          not_determinable: result.not_determinable.length,
+          error_code: failureCode,
+        },
+      });
+    } else {
+      await supabase.from("copilot_audit_log").insert({
+        draft_id: draft.id,
+        tenant_id: draft.tenant_id,
+        action: "risk_check",
+        model_id: modelId,
+        detail: {
+          layers: result.layers.map((l) => `${l.check}:${l.status}`),
+          deterministic_flags: result.deterministic_flags.length,
+          semantic_flags: result.semantic_flags.length,
+          high_severity_flags: highCount,
+          not_determinable: result.not_determinable.length,
+          rejected_quotes: result.rejected_quote_count,
+          malformed_flags: result.malformed_flag_count,
+        },
+      });
+    }
 
     return { ok: true, result, riskCheckedAt: checkedAt };
   });
