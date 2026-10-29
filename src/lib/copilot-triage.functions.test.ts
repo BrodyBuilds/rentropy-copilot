@@ -284,3 +284,23 @@ describe("approveWorkOrder — no cost can be added at approval", () => {
     expect(rows[0]?.["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: true });
   });
 });
+
+describe("photo triage rows and drafts are written only by the server", () => {
+  const isServerTable = (o: Op) => o.table === "copilot_photo_triage" || o.table === "copilot_drafts";
+
+  it("a full run writes triage rows and the reply draft through the admin client only", async () => {
+    const { ops, result } = run();
+    expect(await result).toEqual({ ok: true, triageId: TRIAGE_ID });
+    const writes = ops.filter(isServerTable);
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.every((o) => o.via === "admin")).toBe(true);
+    expect(ops.filter((o) => o.table === "copilot_audit_log").every((o) => o.via === "user")).toBe(true);
+  });
+
+  it("a failed run is marked failed through the admin client", async () => {
+    const { ops, result } = run({ triageUpdateKey: "segmentation" });
+    await result;
+    expect(ops.filter(isServerTable).every((o) => o.via === "admin")).toBe(true);
+    expect(markedFailed(ops)).toBe(true);
+  });
+});

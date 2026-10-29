@@ -525,3 +525,51 @@ describe("failed audit inserts are never reported as success", () => {
     ]);
   });
 });
+
+describe("drafts are written only by the server", () => {
+  const draftWrites = (ops: Op[]) => ops.filter((o) => o.table === "copilot_drafts" && o.kind !== "select");
+  const auditVias = (ops: Op[]) => ops.filter((o) => o.table === "copilot_audit_log").map((o) => o.via);
+
+  it("generating a draft inserts it through the admin client; the audit row stays on the user's access", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Hi Sarah", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+    expect(res.ok).toBe(true);
+    expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["insert", "admin"]]);
+    expect(auditVias(ops)).toEqual(["user"]);
+  });
+
+  it("approve and discard update the draft through the admin client", async () => {
+    for (const decision of ["approve", "discard"] as const) {
+      const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+      await decideDraft({ data: { draft_id: DRAFT_ID, decision }, context: { supabase: client, userId: "u1" } } as never);
+      expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["update", "admin"]]);
+      expect(auditVias(ops)).toEqual(["user"]);
+    }
+  });
+
+  it("the partial-review gate still refuses before any admin write", async () => {
+    const { client, ops } = fakeSupabase({
+      draft: pendingDraft({ risk_flags: { version: 1, status: "partial", checked_body: BODY } }),
+    });
+    await expect(
+      decideDraft({ data: { draft_id: DRAFT_ID, decision: "approve" }, context: { supabase: client, userId: "u1" } } as never),
+    ).rejects.toThrow();
+    expect(ops).toHaveLength(0);
+  });
+
+  it("the risk check saves its result through the admin client", async () => {
+    mockedCallModel.mockResolvedValue({ text: "[]", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft() });
+    const res = await runRiskCheck({
+      data: { draft_id: DRAFT_ID, draft_body: BODY },
+      context: { supabase: client, userId: "u1" },
+    } as never);
+    expect(res.ok).toBe(true);
+    expect(draftWrites(ops).map((o) => [o.kind, o.via])).toEqual([["update", "admin"]]);
+    expect(auditVias(ops)).toEqual(["user"]);
+  });
+});
