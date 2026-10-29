@@ -289,6 +289,10 @@ export function detectMissing(question: string): Missing[] {
   return out;
 }
 
+/** Phrases where "rent" only describes another topic (due day, balance), not the rent amount. */
+const RENT_AS_QUALIFIER =
+  /\brent\s+(?:is\s+|was\s+)?(?:due|late|overdue|past[- ]due|paid|unpaid|behind|outstanding|current|caught up|owed|owing|balance|arrears|payments?)\b|\b(?:late|overdue|past[- ]due|unpaid|back|behind on|caught up on|current on|owes?|owed|owing|pays?|paid|paying)\s+(?:(?:the|her|his|their|any|in|on)\s+)*rent\b|\brent\s+(?:does|did|do)\s+\w+\s+owe\b/g;
+
 export function detectTopics(question: string, missing: Missing[] = detectMissing(question)): Topic[] {
   const q = question.toLowerCase();
   const found = new Set<Topic>();
@@ -320,12 +324,15 @@ export function detectTopics(question: string, missing: Missing[] = detectMissin
   }
   if (/\b(termination|possession|move[- ]?out|moving out|vacat\w*|leaving)\b/.test(q)) found.add("move_out");
 
-  // Rent is mentioned in many questions about other facts ("when is rent due?");
-  // it only counts on its own, or when the question compares against it.
+  // Rent is mentioned in many questions about other facts ("when is rent due?",
+  // "is she behind on rent?"); there it only qualifies the other topic. Anywhere
+  // else ("what is her rent and balance?") rent is asked for in its own right,
+  // so it is kept alongside the other topics.
   if (/\brent\b|monthly (payment|amount)/.test(q)) {
     const others = [...found].filter((t) => t !== "summary").length;
     const compares = /(monthly rent|rent amount|amount of rent|how much (is|does) (the |her |his |their )?(monthly )?rent|rent (cost|price)|months? of rent|how many months|more than|less than|compare|versus|\bvs\b|equal|same as|times)/.test(q);
-    if (others === 0 || compares) found.add("rent");
+    const askedForItself = /\brent\b|monthly (payment|amount)/.test(q.replace(RENT_AS_QUALIFIER, " "));
+    if (others === 0 || compares || askedForItself) found.add("rent");
   }
 
   const order: Topic[] = ["summary", "balance", "rent", "due_day", "late_fee", "deposit_status", "lease_dates", "lease_start", "lease_end", "move_out"];
