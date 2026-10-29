@@ -37,7 +37,8 @@ vi.mock("./copilot-model.server", () => {
 });
 
 import { callModel, ModelCallError } from "./copilot-model.server";
-import { copilotDraft, decideDraft, runRiskCheck } from "./copilot.functions";
+import { copilotDraft, DECISION_AUDIT_FAILED_MESSAGE, decideDraft, runRiskCheck } from "./copilot.functions";
+import { RISK_CHECK_FAILED_MESSAGE } from "./copilot-risk";
 
 const DRAFT_ID = "11111111-1111-4111-8111-111111111111";
 const SARAH_ID = "00000000-0000-4000-8000-000000000001";
@@ -60,7 +61,12 @@ const sarah = {
 type Op = { table: string; kind: string; payload?: unknown };
 
 /** A tiny stand-in for the Supabase client that records writes. */
-function fakeSupabase(opts: { draft: Record<string, unknown>; generateDetail?: Record<string, unknown> }) {
+function fakeSupabase(opts: {
+  draft: Record<string, unknown>;
+  generateDetail?: Record<string, unknown>;
+  /** Audit inserts with these actions return an error, as supabase-js does (no throw). */
+  failAuditActions?: string[];
+}) {
   const ops: Op[] = [];
   const client = {
     from(table: string) {
@@ -70,6 +76,10 @@ function fakeSupabase(opts: { draft: Record<string, unknown>; generateDetail?: R
       const result = () => {
         if (kind === "insert") {
           if (table === "copilot_drafts") return { data: { id: DRAFT_ID, ...(payload as object) }, error: null };
+          const action = String((payload as Record<string, unknown>)["action"]);
+          if (table === "copilot_audit_log" && opts.failAuditActions?.includes(action)) {
+            return { data: null, error: { message: "insert failed" } };
+          }
           return { data: null, error: null };
         }
         if (table === "copilot_audit_log") {
@@ -335,5 +345,93 @@ describe("draft language (compose flow)", () => {
 
     expect(res.ok && res.result.deterministic_flags.some((f) => f.quote === "$500.00")).toBe(true);
     expect(prompts()[0]).toContain(spanishBody);
+  });
+});
+
+describe("failed audit inserts are never reported as success", () => {
+  const ctx = (client: unknown) => ({ supabase: client, userId: "u1" });
+
+  it("drafting: a failed generate audit row returns the save failure, not the draft", async () => {
+    mockedCallModel.mockResolvedValue({ text: "Hi Sarah", modelId: "meta-test-model" });
+    const { client } = fakeSupabase({ draft: pendingDraft(), failAuditActions: ["generate"] });
+
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" },
+      context: ctx(client),
+    } as never);
+
+    expect(res).toEqual({ ok: false, error: "The draft couldn't be saved. Please try again." });
+  });
+
+  it("drafting: a failed model_error audit row still returns the plain failure", async () => {
+    mockedCallModel.mockRejectedValue(new ModelCallError("down", "meta-test-model", "http_error"));
+    const { client } = fakeSupabase({ draft: pendingDraft(), failAuditActions: ["model_error"] });
+
+    const res = await copilotDraft({
+      data: { tenant_id: SARAH_ID, message_type: "late_rent", tone: "friendly" },
+      context: ctx(client),
+    } as never);
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("approve/discard: a failed decision audit row throws instead of returning the draft", async () => {
+    for (const action of ["approve", "discard"] as const) {
+      const { client } = fakeSupabase({ draft: pendingDraft(), failAuditActions: [action] });
+      await expect(
+        decideDraft({
+          data: { draft_id: DRAFT_ID, decision: action, ...(action === "approve" ? { draft_body: BODY } : {}) },
+          context: ctx(client),
+        } as never),
+      ).rejects.toThrow(DECISION_AUDIT_FAILED_MESSAGE);
+    }
+  });
+
+  it("approve after partial review: a failed audit row throws", async () => {
+    const { client } = fakeSupabase({
+      draft: pendingDraft({ risk_flags: { version: 1, status: "partial", checked_body: BODY } }),
+      failAuditActions: ["approved_after_partial_review"],
+    });
+    await expect(
+      decideDraft({
+        data: { draft_id: DRAFT_ID, decision: "approve", draft_body: BODY, partial_review_acknowledged: true },
+        context: ctx(client),
+      } as never),
+    ).rejects.toThrow(DECISION_AUDIT_FAILED_MESSAGE);
+  });
+
+  it("risk check: a failed risk_check audit row fails the check and clears the stored result", async () => {
+    mockedCallModel.mockResolvedValue({ text: "[]", modelId: "meta-test-model" });
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(), failAuditActions: ["risk_check"] });
+
+    const res = await runRiskCheck({ data: { draft_id: DRAFT_ID, draft_body: BODY }, context: ctx(client) } as never);
+
+    expect(res).toEqual({ ok: false, error: RISK_CHECK_FAILED_MESSAGE });
+    const updates = ops.filter((o) => o.table === "copilot_drafts" && o.kind === "update");
+    expect(updates.at(-1)!.payload).toEqual({ risk_flags: null, risk_checked_at: null });
+  });
+
+  it("risk check: a failed risk_check audit row on a partial also fails and clears", async () => {
+    mockedCallModel.mockRejectedValue(new ModelCallError("timed out", "meta-test-model", "timeout"));
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(), failAuditActions: ["risk_check"] });
+
+    const res = await runRiskCheck({ data: { draft_id: DRAFT_ID, draft_body: BODY }, context: ctx(client) } as never);
+
+    expect(res).toEqual({ ok: false, error: RISK_CHECK_FAILED_MESSAGE });
+    const updates = ops.filter((o) => o.table === "copilot_drafts" && o.kind === "update");
+    expect(updates.at(-1)!.payload).toEqual({ risk_flags: null, risk_checked_at: null });
+  });
+
+  it("risk check: a failed model_error audit row fails the check and saves no partial result", async () => {
+    mockedCallModel.mockRejectedValue(new ModelCallError("timed out", "meta-test-model", "timeout"));
+    const { client, ops } = fakeSupabase({ draft: pendingDraft(), failAuditActions: ["model_error"] });
+
+    const res = await runRiskCheck({ data: { draft_id: DRAFT_ID, draft_body: BODY }, context: ctx(client) } as never);
+
+    expect(res).toEqual({ ok: false, error: RISK_CHECK_FAILED_MESSAGE });
+    expect(ops.some((o) => o.table === "copilot_drafts" && o.kind === "update")).toBe(false);
+    expect(ops.filter((o) => o.table === "copilot_audit_log").map((o) => (o.payload as { action: string }).action)).toEqual([
+      "model_error",
+    ]);
   });
 });
