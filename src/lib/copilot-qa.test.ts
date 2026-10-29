@@ -248,6 +248,40 @@ describe("cross-scope refusal uses every demo tenant's name, in any case", () =>
   });
 });
 
+describe("cross-scope refusal uses every demo tenant's property label, in any case", () => {
+  const names = ["James Carter"];
+  const props = ["Maple Ridge"];
+
+  it("refuses a lowercase other-property question", () => {
+    expect(planAnswer("what is the rent at maple ridge?", sarah, names, props)).toEqual({
+      kind: "refused",
+      message: CROSS_SCOPE_MESSAGE,
+    });
+    expect(planAnswer("WHAT IS OWED AT MAPLE RIDGE", sarah, names, props).kind).toBe("refused");
+  });
+
+  it("refuses another property even with a leading 'the' dropped or in lowercase", () => {
+    expect(planAnswer("what's the rent at the heights?", james, ["Sarah Jenkins"], ["The Heights"]).kind).toBe(
+      "refused",
+    );
+    expect(planAnswer("is anything owed at heights", james, ["Sarah Jenkins"], ["The Heights"]).kind).toBe(
+      "refused",
+    );
+  });
+
+  it("never refuses the page tenant's own property or name in any case", () => {
+    expect(planAnswer("what is the rent at the heights?", sarah, names, props).kind).toBe("answered");
+    expect(planAnswer("what does sarah jenkins owe at the heights?", sarah, names, props).kind).toBe("answered");
+    expect(planAnswer("what is the rent at maple ridge?", james, ["Sarah Jenkins"], ["The Heights"]).kind).toBe(
+      "answered",
+    );
+  });
+
+  it("a label shared with the page tenant's own property never triggers a refusal", () => {
+    expect(planAnswer("what's the rent at the heights?", sarah, names, ["The Heights"]).kind).toBe("answered");
+  });
+});
+
 describe("rent is kept alongside other asked topics", () => {
   it("rent and balance: both halves go to the answer path", () => {
     const plan = planAnswer("What is her rent and balance?", sarah);
@@ -342,7 +376,10 @@ function fakeSupabase(page: TenantRecord, all: TenantRecord[]) {
           Promise.resolve(
             op.kind === "insert"
               ? { data: null, error: null }
-              : { data: all.map((t) => ({ id: t.id, full_name: t.full_name })), error: null },
+              : {
+                  data: all.map((t) => ({ id: t.id, full_name: t.full_name, property_label: t.property_label })),
+                  error: null,
+                },
           ).then(resolve),
       };
       return b;
@@ -376,11 +413,30 @@ describe("askAboutTenant", () => {
     });
   });
 
-  it("reads only names from the tenant list, never other tenants' facts", async () => {
+  it("reads only names and property labels from the tenant list, never other tenants' facts", async () => {
     const { ops, result } = run("what does james owe?");
     await result;
-    const lists = ops.filter((o) => o.table === "demo_tenants" && o.columns === "id, full_name");
+    const lists = ops.filter((o) => o.table === "demo_tenants" && o.columns === "id, full_name, property_label");
     expect(lists).toHaveLength(1);
+  });
+
+  it("refuses a lowercase other-property question with no model call and a refused_cross_scope audit row", async () => {
+    const { ops, result } = run("what is the rent at maple ridge?");
+    expect(await result).toEqual({ ok: true, outcome: "refused", message: CROSS_SCOPE_MESSAGE });
+    expect(mockedCallModel).not.toHaveBeenCalled();
+    const audits = ops.filter((o) => o.kind === "insert");
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.payload).toMatchObject({
+      tenant_id: sarah.id,
+      action: "qa",
+      model_id: null,
+      detail: { outcome: "refused_cross_scope", model_called: false },
+    });
+  });
+
+  it("does not refuse a lowercase question naming the page tenant's own property", async () => {
+    const { result } = run("what is the rent at the heights?");
+    expect(await result).toMatchObject({ ok: true, outcome: "answered" });
   });
 
   it("sends the model only the page tenant's facts for a rent-and-balance question", async () => {

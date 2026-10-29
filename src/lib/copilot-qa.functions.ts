@@ -1,6 +1,6 @@
 // Slice 4: read-only landlord Q&A. One server function, one audit action ("qa").
 // Reads ONLY the page tenant's row from demo_tenants (plus the other tenants'
-// names, used only to refuse cross-scope questions) and writes only audit rows —
+// names and property labels, used only to refuse cross-scope questions) and writes only audit rows —
 // never a draft, a message, or anything else.
 
 import { createServerFn } from "@tanstack/react-start";
@@ -46,14 +46,16 @@ export const askAboutTenant = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<AskResult> => {
     const { supabase } = context;
 
-    // The scope tenant's row; from every other tenant, only the name (for the scope check).
+    // The scope tenant's row; from every other tenant, only the name and property label (for the scope check).
     const [{ data: tenant, error: tenantError }, { data: nameRows, error: namesError }] = await Promise.all([
       supabase.from("demo_tenants").select(QA_TENANT_COLUMNS).eq("id", data.tenant_id).maybeSingle(),
-      supabase.from("demo_tenants").select("id, full_name"),
+      supabase.from("demo_tenants").select("id, full_name, property_label"),
     ]);
     if (tenantError || namesError) throw new Error("Could not load tenant");
     if (!tenant) return { ok: false, error: "Tenant not found." };
-    const otherTenantNames = (nameRows ?? []).filter((r) => r.id !== tenant.id).map((r) => r.full_name);
+    const others = (nameRows ?? []).filter((r) => r.id !== tenant.id);
+    const otherTenantNames = others.map((r) => r.full_name);
+    const otherPropertyLabels = others.map((r) => r.property_label);
 
     const audit = async (action: "qa" | "model_error", modelId: string | null, detail: Record<string, unknown>) => {
       const { error } = await supabase.from("copilot_audit_log").insert({
@@ -66,8 +68,8 @@ export const askAboutTenant = createServerFn({ method: "POST" })
       return !error;
     };
 
-    // Other tenants' names are used only for matching here; they never reach the model.
-    const plan = planAnswer(data.question, tenant, otherTenantNames);
+    // Other tenants' names and property labels are used only for matching here; they never reach the model.
+    const plan = planAnswer(data.question, tenant, otherTenantNames, otherPropertyLabels);
 
     // Step 1: cross-scope questions are refused before any model call.
     if (plan.kind === "refused") {

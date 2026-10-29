@@ -175,28 +175,52 @@ function words(s: string): string[] {
     .filter(Boolean);
 }
 
+/** True when `label`'s words appear in `qWords` as one consecutive run. */
+function containsRun(qWords: readonly string[], label: readonly string[]): boolean {
+  if (label.length === 0) return false;
+  for (let i = 0; i + label.length <= qWords.length; i++) {
+    if (label.every((w, j) => qWords[i + j] === w)) return true;
+  }
+  return false;
+}
+
 /**
  * True when the question names a tenant or property other than this tenant's.
- * `otherTenantNames` are the other demo tenants' full names — names only, used
- * for matching and never passed anywhere else. They match in any letter case,
- * so "what does james carter owe" is refused just like "James Carter".
+ * `otherTenantNames` / `otherPropertyLabels` are the other demo tenants' full
+ * names and property labels — used only for matching here, never passed
+ * anywhere else. Both match in any letter case, so "what does james carter
+ * owe" and "what's the rent at maple ridge" are refused like their capitalised forms.
  */
 export function isCrossScope(
   question: string,
   tenant: Pick<TenantRecord, "full_name" | "property_label">,
   otherTenantNames: readonly string[] = [],
+  otherPropertyLabels: readonly string[] = [],
 ): boolean {
   const q = question.normalize("NFKC");
   if (OTHER_SCOPE.test(q)) return true;
 
   const own = new Set([...words(tenant.full_name), ...words(tenant.property_label)]);
+  const qWords = words(q);
 
   const otherNameWords = new Set(
     otherTenantNames
       .flatMap((name) => words(name.normalize("NFKC")))
       .filter((w) => w.length >= 2 && !own.has(w) && !COMMON_WORDS.has(w)),
   );
-  if (words(q).some((w) => otherNameWords.has(w))) return true;
+  if (qWords.some((w) => otherNameWords.has(w))) return true;
+
+  // Another property's label, matched as its whole word run (a leading "the" is
+  // optional, so "heights" matches "The Heights"). A label that is the page
+  // tenant's own property, or made only of the page tenant's words, never matches.
+  const ownLabel = words(tenant.property_label.normalize("NFKC")).join(" ");
+  for (const label of otherPropertyLabels) {
+    let lw = words(label.normalize("NFKC"));
+    if (lw.join(" ") === ownLabel) continue;
+    if (lw[0] === "the" && lw.length > 1) lw = lw.slice(1);
+    if (lw.every((w) => own.has(w) || COMMON_WORDS.has(w))) continue;
+    if (containsRun(qWords, lw)) return true;
+  }
 
   for (const m of q.matchAll(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}]*/gu)) {
     const word = m[0].toLowerCase();
@@ -387,8 +411,11 @@ export function planAnswer(
   question: string,
   tenant: TenantRecord,
   otherTenantNames: readonly string[] = [],
+  otherPropertyLabels: readonly string[] = [],
 ): QaPlan {
-  if (isCrossScope(question, tenant, otherTenantNames)) return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
+  if (isCrossScope(question, tenant, otherTenantNames, otherPropertyLabels)) {
+    return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
+  }
 
   const missing = detectMissing(question);
   const topics = detectTopics(question, missing);
