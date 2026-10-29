@@ -37,8 +37,13 @@ vi.mock("./copilot-model.server", () => {
 });
 
 import { callModel, ModelCallError } from "./copilot-model.server";
-import { copilotDraft, DECISION_AUDIT_FAILED_MESSAGE, decideDraft, runRiskCheck } from "./copilot.functions";
-import { RISK_CHECK_FAILED_MESSAGE } from "./copilot-risk";
+import {
+  copilotDraft,
+  DECISION_AUDIT_FAILED_MESSAGE,
+  decideDraft,
+  RISK_CHECK_FAILED_MESSAGE,
+  runRiskCheck,
+} from "./copilot.functions";
 
 const DRAFT_ID = "11111111-1111-4111-8111-111111111111";
 const SARAH_ID = "00000000-0000-4000-8000-000000000001";
