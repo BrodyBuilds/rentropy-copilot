@@ -262,7 +262,7 @@ describe("approveWorkOrder — no cost can be added at approval", () => {
     });
     const rows = audits(ops);
     expect(rows.map((a) => a["action"])).toEqual(["approve"]);
-    expect(rows[0]["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: false });
+    expect(rows[0]?.["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: false });
   });
 
   it("an edited body with no cost approves as today", async () => {
@@ -271,6 +271,6 @@ describe("approveWorkOrder — no cost can be added at approval", () => {
     await approve(client, edited);
     const rows = audits(ops);
     expect(rows.map((a) => a["action"])).toEqual(["approve"]);
-    expect(rows[0]["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: true });
+    expect(rows[0]?.["detail"]).toEqual({ kind: "work_order", triage_id: TRIAGE_ID, edited: true });
   });
 });
