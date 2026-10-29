@@ -124,7 +124,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       return { ok: false, error: "The photo couldn't be saved. Please try again." };
     }
 
-    const { data: triage, error: triageError } = await supabase
+    const { data: triage, error: triageError } = await supabaseAdmin
       .from("copilot_photo_triage")
       .insert({
         tenant_id: tenant.id,
@@ -169,7 +169,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       regionsPerConcept,
     } = assembleSegmentation(samResults, configuredSamModelId());
     const samModelId = segmentation.sam_model_id;
-    const { error: segmentationSaveError } = await supabase
+    const { error: segmentationSaveError } = await supabaseAdmin
       .from("copilot_photo_triage")
       .update({ segmentation: segmentation as unknown as Json })
       .eq("id", triage.id);
@@ -221,7 +221,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
     }
 
     // 5. The tenant reply is a normal pending draft, so it gets the same risk check and approval.
-    const { data: draft, error: draftError } = await supabase
+    const { data: draft, error: draftError } = await supabaseAdmin
       .from("copilot_drafts")
       .insert({
         tenant_id: tenant.id,
@@ -260,7 +260,7 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       dropped_findings: screened.dropped,
     };
 
-    const { error: saveError } = await supabase
+    const { error: saveError } = await supabaseAdmin
       .from("copilot_photo_triage")
       .update({
         findings: findings as unknown as Json,
@@ -396,7 +396,9 @@ export const approveWorkOrder = createServerFn({ method: "POST" })
       ...findings,
       work_order: { body: data.body, status: "approved", approved_at: new Date().toISOString() },
     };
-    const { data: updated, error: updateError } = await supabase
+    // The cost and pending checks above run here, so the server is the only write path.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: updated, error: updateError } = await supabaseAdmin
       .from("copilot_photo_triage")
       .update({ findings: next as unknown as Json })
       .eq("id", row.id)
@@ -415,7 +417,7 @@ export const approveWorkOrder = createServerFn({ method: "POST" })
     if (auditError) {
       // No approval without its record: put the work order back to pending.
       console.error("[triage] work order approve audit insert failed", auditError);
-      const { error: revertError } = await supabase
+      const { error: revertError } = await supabaseAdmin
         .from("copilot_photo_triage")
         .update({ findings: findings as unknown as Json })
         .eq("id", row.id)
