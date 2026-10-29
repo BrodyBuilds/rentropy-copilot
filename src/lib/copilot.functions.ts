@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -35,10 +35,10 @@ const DEMO_EMAIL = "demo-landlord@example.com";
 
 export type DraftRow = Database["public"]["Tables"]["copilot_drafts"]["Row"];
 
-type Supabase = { from: (table: "copilot_audit_log") => any };
-
 /** A draft's language, read from its "generate" audit row (English when none is recorded). */
-async function readDraftLanguage(supabase: Supabase, draftId: string): Promise<DraftLanguage> {
+async function readDraftLanguage(
+  supabase: SupabaseClient<Database>,
+  draftId: string): Promise<DraftLanguage> {
   const { data, error } = await supabase
     .from("copilot_audit_log")
     .select("detail")
