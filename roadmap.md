@@ -10,3 +10,4 @@
 - [x] Add META_SAM_MODEL_ID value
 - [x] Slice 4: read-only tenant Q&A panel (scope check, code answers, verified AI wording, qa audit action)
 - [x] Compose flow: English / Spanish draft language (prompt + audit detail, "Draft — Spanish" label)
+- [x] Audit log: expandable entries with full stored record, both triage models, linked draft details
