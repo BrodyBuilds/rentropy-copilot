@@ -175,12 +175,29 @@ function words(s: string): string[] {
     .filter(Boolean);
 }
 
-/** True when the question names a tenant or property other than this tenant's. */
-export function isCrossScope(question: string, tenant: Pick<TenantRecord, "full_name" | "property_label">): boolean {
+/**
+ * True when the question names a tenant or property other than this tenant's.
+ * `otherTenantNames` are the other demo tenants' full names — names only, used
+ * for matching and never passed anywhere else. They match in any letter case,
+ * so "what does james carter owe" is refused just like "James Carter".
+ */
+export function isCrossScope(
+  question: string,
+  tenant: Pick<TenantRecord, "full_name" | "property_label">,
+  otherTenantNames: readonly string[] = [],
+): boolean {
   const q = question.normalize("NFKC");
   if (OTHER_SCOPE.test(q)) return true;
 
   const own = new Set([...words(tenant.full_name), ...words(tenant.property_label)]);
+
+  const otherNameWords = new Set(
+    otherTenantNames
+      .flatMap((name) => words(name.normalize("NFKC")))
+      .filter((w) => w.length >= 2 && !own.has(w) && !COMMON_WORDS.has(w)),
+  );
+  if (words(q).some((w) => otherNameWords.has(w))) return true;
+
   for (const m of q.matchAll(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}]*/gu)) {
     const word = m[0].toLowerCase();
     if (own.has(word) || COMMON_WORDS.has(word)) continue;
