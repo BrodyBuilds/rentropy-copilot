@@ -68,7 +68,10 @@ function fakeSupabase(opts: { draft: Record<string, unknown>; generateDetail?: R
       let payload: unknown;
       let neq = false;
       const result = () => {
-        if (kind === "insert") return { data: null, error: null };
+        if (kind === "insert") {
+          if (table === "copilot_drafts") return { data: { id: DRAFT_ID, ...(payload as object) }, error: null };
+          return { data: null, error: null };
+        }
         if (table === "copilot_audit_log") {
           return { data: opts.generateDetail ? { detail: opts.generateDetail } : null, error: null };
         }
@@ -93,6 +96,7 @@ function fakeSupabase(opts: { draft: Record<string, unknown>; generateDetail?: R
         },
         insert: (p: unknown) => {
           kind = "insert";
+          payload = p;
           ops.push({ table, kind, payload: p });
           return b;
         },
