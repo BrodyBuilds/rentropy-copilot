@@ -38,7 +38,8 @@ export type DraftRow = Database["public"]["Tables"]["copilot_drafts"]["Row"];
 /** A draft's language, read from its "generate" audit row (English when none is recorded). */
 async function readDraftLanguage(
   supabase: SupabaseClient<Database>,
-  draftId: string): Promise<DraftLanguage> {
+  draftId: string,
+): Promise<DraftLanguage> {
   const { data, error } = await supabase
     .from("copilot_audit_log")
     .select("detail")

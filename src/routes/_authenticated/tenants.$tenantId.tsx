@@ -31,11 +31,15 @@ import {
 import type { Json } from "@/integrations/supabase/types";
 import { applySuggestion, type RiskFlag } from "@/lib/copilot-risk";
 import {
+  DEFAULT_DRAFT_LANGUAGE,
+  DRAFT_LANGUAGES,
   MESSAGE_TYPES,
   TONES,
   buildFacts,
+  draftHeading,
   formatCents,
   formatDate,
+  type DraftLanguage,
   type Fact,
   type MessageType,
   type Tone,
@@ -85,6 +89,9 @@ function ComposePage() {
 
   const [messageType, setMessageType] = useState<MessageType>("late_rent");
   const [tone, setTone] = useState<Tone>("firm_but_fair");
+  const [language, setLanguage] = useState<DraftLanguage>(DEFAULT_DRAFT_LANGUAGE);
+  // Language of the draft on screen (may differ from the picker until a new draft is written).
+  const [draftLanguage, setDraftLanguage] = useState<DraftLanguage>(DEFAULT_DRAFT_LANGUAGE);
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftRow | null>(null);
@@ -113,6 +120,8 @@ function ComposePage() {
     const savedTone = TONES.find((t) => t.value === d.tone)?.value;
     if (type) setMessageType(type);
     if (savedTone) setTone(savedTone);
+    setLanguage(d.language);
+    setDraftLanguage(d.language);
     setDraft(d);
     setBody(d.draft_body);
     setFacts(type ? buildFacts(tenant, type) : []);
@@ -130,13 +139,14 @@ function ComposePage() {
     setError(null);
     try {
       const result = await generate({
-        data: { tenant_id: tenantId, message_type: messageType, tone },
+        data: { tenant_id: tenantId, message_type: messageType, tone, language },
       });
       if (!result.ok) {
         setError(result.error);
         return;
       }
       setDraft(result.draft);
+      setDraftLanguage(result.language);
       setFacts(result.facts);
       setBody(result.draft.draft_body);
       resetRisk();
@@ -283,13 +293,22 @@ function ComposePage() {
       </div>
 
       <section className="mt-8 rounded-lg border border-border bg-card p-5">
-        <ChoiceRow
-          label="Message type"
-          options={MESSAGE_TYPES}
-          value={messageType}
-          onChange={setMessageType}
-          disabled={drafting || isPending}
-        />
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
+          <ChoiceRow
+            label="Message type"
+            options={MESSAGE_TYPES}
+            value={messageType}
+            onChange={setMessageType}
+            disabled={drafting || isPending}
+          />
+          <ChoiceRow
+            label="Draft language"
+            options={DRAFT_LANGUAGES}
+            value={language}
+            onChange={setLanguage}
+            disabled={drafting || isPending}
+          />
+        </div>
         <div className="mt-4">
           <ChoiceRow
             label="Tone"
@@ -324,7 +343,9 @@ function ComposePage() {
         <section className="mt-6 grid gap-6 md:grid-cols-[1fr_280px]">
           <div className="rounded-lg border border-border bg-card p-5">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-foreground">Draft</h2>
+              <h2 className="text-lg font-semibold text-foreground">
+                {draftHeading(draftLanguage)}
+              </h2>
               <StatusBadge status={draft.status} />
             </div>
             <Textarea
