@@ -311,8 +311,62 @@ export const decideDraft = createServerFn({ method: "POST" })
 
 export const RISK_CHECK_FAILED_MESSAGE = "Risk check couldn't run — review carefully";
 
+/** Per-call options for the language review only; every other call keeps the adapter default. */
+export const RISK_REVIEW_CALL_OPTIONS = { temperature: 0, timeoutMs: 60_000 } as const;
+
+/** "complete" = rule checks and language review both ran; "partial" = rule checks only. */
+export type RiskCheckStatus = "complete" | "partial";
+export type StoredLayerRun = Omit<LayerRun, "status"> & { status: LayerRun["status"] | "not_run" };
+/** What is stored in copilot_drafts.risk_flags. Results saved before `status` existed were complete. */
+export type StoredRiskResult = Omit<RiskResult, "layers"> & {
+  status: RiskCheckStatus;
+  layers: StoredLayerRun[];
+};
+
+export const LANGUAGE_REVIEW_NOT_RUN_INFO = {
+  check: "semantic",
+  title: "Language review could not run",
+  detail:
+    "The AI language review didn't finish, so only the rule checks ran. Read the draft yourself for threatening, discriminatory, retaliatory or otherwise risky wording before approving.",
+} as const satisfies RiskInfo;
+
+export function isPartialRiskResult(value: unknown): boolean {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (value as { status?: unknown }).status === "partial"
+  );
+}
+
+/** A risk result built from the rule checks alone, used when the language review fails. */
+export function buildPartialRiskResult(args: {
+  body: string;
+  checkedAt: string;
+  modelId: string;
+  deterministic: ReturnType<typeof runDeterministicChecks>;
+}): StoredRiskResult {
+  return {
+    version: 1,
+    status: "partial",
+    checked_body: args.body,
+    checked_at: args.checkedAt,
+    model_id: args.modelId,
+    layers: [
+      ...args.deterministic.layers,
+      { check: "semantic", layer: "semantic", status: "not_run" },
+    ],
+    deterministic_flags: args.deterministic.flags,
+    semantic_flags: [],
+    not_determinable: args.deterministic.notDeterminable,
+    info: [...args.deterministic.info, { ...LANGUAGE_REVIEW_NOT_RUN_INFO }],
+    rejected_quote_count: 0,
+    malformed_flag_count: 0,
+  };
+}
+
 export type RiskCheckResult =
-  | { ok: true; result: RiskResult; riskCheckedAt: string }
+  | { ok: true; result: StoredRiskResult; riskCheckedAt: string }
   | { ok: false; error: string };
 
 /** Today's date (YYYY-MM-DD) in North Carolina's time zone. */
