@@ -151,7 +151,10 @@ export const listAudit = createServerFn({ method: "GET" })
       action: row.action,
       model_id: row.model_id,
       draft_id: row.draft_id,
+      /** One-line summary for the collapsed row. */
       detail: auditSummary(row.action, row.detail),
+      /** The row's full stored detail, exactly as recorded, for the expanded view. */
+      full_detail: row.detail,
       tenant_name: row.tenant?.full_name ?? null,
     }));
   });
