@@ -215,7 +215,7 @@ export const copilotDraft = createServerFn({ method: "POST" })
     } catch (error) {
       const modelId = error instanceof ModelCallError ? error.modelId : configuredModelId();
       const code = error instanceof ModelCallError ? error.code : "unknown";
-      await supabase.from("copilot_audit_log").insert({
+      const { error: auditError } = await supabase.from("copilot_audit_log").insert({
         tenant_id: tenant.id,
         action: "model_error",
         model_id: modelId,
@@ -226,6 +226,7 @@ export const copilotDraft = createServerFn({ method: "POST" })
           error_code: code,
         },
       });
+      if (auditError) console.error("[copilot] model_error audit insert failed", auditError);
       return { ok: false, error: "The AI couldn't write a draft just now. Please try again." };
     }
 
@@ -246,7 +247,7 @@ export const copilotDraft = createServerFn({ method: "POST" })
       return { ok: false, error: "The draft couldn't be saved. Please try again." };
     }
 
-    await supabase.from("copilot_audit_log").insert({
+    const { error: auditError } = await supabase.from("copilot_audit_log").insert({
       draft_id: draft.id,
       tenant_id: tenant.id,
       action: "generate",
@@ -258,6 +259,11 @@ export const copilotDraft = createServerFn({ method: "POST" })
         fact_fields: facts.map((f) => f.field),
       },
     });
+    if (auditError) {
+      // A draft without its generate record must not be reported as created.
+      console.error("[copilot] generate audit insert failed", auditError);
+      return { ok: false, error: "The draft couldn't be saved. Please try again." };
+    }
 
     return { ok: true, draft, facts, modelId: result.modelId, language: data.language };
   });
@@ -266,6 +272,9 @@ export const copilotDraft = createServerFn({ method: "POST" })
 
 export const PARTIAL_ACK_REQUIRED_MESSAGE =
   "The language review did not run. Confirm you reviewed this draft yourself before approving.";
+
+export const DECISION_AUDIT_FAILED_MESSAGE =
+  "The decision was saved, but its audit record couldn't be written. Check the audit log before relying on it.";
 
 export const decideDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -319,7 +328,7 @@ export const decideDraft = createServerFn({ method: "POST" })
     if (updateError) throw new Error("Could not update draft");
     if (!updated) throw new Error("This draft has already been decided");
 
-    await supabase.from("copilot_audit_log").insert(
+    const { error: auditError } = await supabase.from("copilot_audit_log").insert(
       approvingPartial
         ? {
             draft_id: updated.id,
@@ -341,6 +350,11 @@ export const decideDraft = createServerFn({ method: "POST" })
             detail: { edited, language },
           },
     );
+    if (auditError) {
+      // A decided draft can't be moved back to pending, so say exactly what happened.
+      console.error("[copilot] decision audit insert failed", auditError);
+      throw new Error(DECISION_AUDIT_FAILED_MESSAGE);
+    }
 
     return updated;
   });
@@ -482,13 +496,18 @@ export const runRiskCheck = createServerFn({ method: "POST" })
     } catch (error) {
       modelId = error instanceof ModelCallError ? error.modelId : configuredModelId();
       failureCode = error instanceof ModelCallError ? error.code : "unknown";
-      await supabase.from("copilot_audit_log").insert({
+      const { error: auditError } = await supabase.from("copilot_audit_log").insert({
         draft_id: draft.id,
         tenant_id: draft.tenant_id,
         action: "model_error",
         model_id: modelId,
         detail: { stage: "risk_check", error_code: failureCode },
       });
+      if (auditError) {
+        // Without a record of the failed language review, no partial result is saved.
+        console.error("[copilot] risk model_error audit insert failed", auditError);
+        return { ok: false, error: RISK_CHECK_FAILED_MESSAGE };
+      }
     }
 
     // Step 4: store everything on the draft and audit the counts. When the language
@@ -521,56 +540,65 @@ export const runRiskCheck = createServerFn({ method: "POST" })
       .eq("status", "pending")
       .select("risk_checked_at")
       .maybeSingle();
+    // Nothing usable was recorded: never leave a result (older or new) looking current.
+    const clearStoredResult = async () => {
+      const { error } = await supabase
+        .from("copilot_drafts")
+        .update({ risk_flags: null, risk_checked_at: null })
+        .eq("id", draft.id)
+        .eq("status", "pending");
+      if (error) console.error("[copilot] clearing risk result failed", error);
+    };
+
     if (updateError) {
       console.error("[copilot] risk result save failed", updateError);
-      if (result.status === "partial") {
-        // Nothing usable was saved: never leave an older result looking current.
-        await supabase
-          .from("copilot_drafts")
-          .update({ risk_flags: null, risk_checked_at: null })
-          .eq("id", draft.id)
-          .eq("status", "pending");
-      }
+      if (result.status === "partial") await clearStoredResult();
       return { ok: false, error: RISK_CHECK_FAILED_MESSAGE };
     }
     if (!updated) return { ok: false, error: "This draft has already been decided." };
 
     const allFlags = [...result.deterministic_flags, ...result.semantic_flags];
     const highCount = allFlags.filter((f) => f.severity === "high").length;
-    if (result.status === "partial") {
-      const det = result.deterministic_flags.length;
-      await supabase.from("copilot_audit_log").insert({
-        draft_id: draft.id,
-        tenant_id: draft.tenant_id,
-        action: "risk_check",
-        model_id: null,
-        detail: {
-          status: "partial",
-          partial_preserved: true,
-          summary: `Partial — rule checks only · ${det} rule flag${det === 1 ? "" : "s"} · language review did not run`,
-          layers: result.layers.map((l) => `${l.check}:${l.status}`),
-          deterministic_flags: det,
-          high_severity_flags: highCount,
-          not_determinable: result.not_determinable.length,
-          error_code: failureCode,
-        },
-      });
-    } else {
-      await supabase.from("copilot_audit_log").insert({
-        draft_id: draft.id,
-        tenant_id: draft.tenant_id,
-        action: "risk_check",
-        model_id: modelId,
-        detail: {
-          layers: result.layers.map((l) => `${l.check}:${l.status}`),
-          deterministic_flags: result.deterministic_flags.length,
-          semantic_flags: result.semantic_flags.length,
-          high_severity_flags: highCount,
-          not_determinable: result.not_determinable.length,
-          rejected_quotes: result.rejected_quote_count,
-          malformed_flags: result.malformed_flag_count,
-        },
-      });
+    const det = result.deterministic_flags.length;
+    const { error: auditError } = await supabase.from("copilot_audit_log").insert(
+      result.status === "partial"
+        ? {
+            draft_id: draft.id,
+            tenant_id: draft.tenant_id,
+            action: "risk_check",
+            model_id: null,
+            detail: {
+              status: "partial",
+              partial_preserved: true,
+              summary: `Partial — rule checks only · ${det} rule flag${det === 1 ? "" : "s"} · language review did not run`,
+              layers: result.layers.map((l) => `${l.check}:${l.status}`),
+              deterministic_flags: det,
+              high_severity_flags: highCount,
+              not_determinable: result.not_determinable.length,
+              error_code: failureCode,
+            },
+          }
+        : {
+            draft_id: draft.id,
+            tenant_id: draft.tenant_id,
+            action: "risk_check",
+            model_id: modelId,
+            detail: {
+              layers: result.layers.map((l) => `${l.check}:${l.status}`),
+              deterministic_flags: result.deterministic_flags.length,
+              semantic_flags: result.semantic_flags.length,
+              high_severity_flags: highCount,
+              not_determinable: result.not_determinable.length,
+              rejected_quotes: result.rejected_quote_count,
+              malformed_flags: result.malformed_flag_count,
+            },
+          },
+    );
+    if (auditError) {
+      // A stored result with no risk_check record must not count as a check that ran.
+      console.error("[copilot] risk_check audit insert failed", auditError);
+      await clearStoredResult();
+      return { ok: false, error: RISK_CHECK_FAILED_MESSAGE };
     }
 
     return { ok: true, result, riskCheckedAt: checkedAt };
