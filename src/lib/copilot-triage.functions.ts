@@ -78,17 +78,26 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
 
     const concepts = conceptsFromNote(data.note);
 
-    async function failRun(code: string, modelId: string | null, triageId: string | null) {
+    // Every failed run: the row leaves "processing" for "failed" and a model_error row is
+    // written. Both writes are checked; the run reports failure either way.
+    async function failRun(
+      code: string,
+      modelId: string | null,
+      triageId: string | null,
+      opts: { message?: string; detail?: Record<string, unknown> } = {},
+    ) {
       if (triageId) {
-        await supabase.from("copilot_photo_triage").update({ status: "failed" }).eq("id", triageId);
+        const { error } = await supabase.from("copilot_photo_triage").update({ status: "failed" }).eq("id", triageId);
+        if (error) console.error("[triage] marking run failed did not save", error);
       }
-      await supabase.from("copilot_audit_log").insert({
+      const { error: auditError } = await supabase.from("copilot_audit_log").insert({
         tenant_id: tenant!.id,
         action: "model_error",
         model_id: modelId,
-        detail: { stage: "photo_triage", error_code: code, triage_id: triageId, concepts },
+        detail: { stage: "photo_triage", error_code: code, triage_id: triageId, concepts, ...opts.detail } as Json,
       });
-      return { ok: false as const, error: TRIAGE_FAILED_MESSAGE };
+      if (auditError) console.error("[triage] model_error audit insert failed", auditError);
+      return { ok: false as const, error: opts.message ?? TRIAGE_FAILED_MESSAGE };
     }
 
     // Fail honestly before storing anything when a model setting is missing.
@@ -153,10 +162,14 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       regionsPerConcept,
     } = assembleSegmentation(samResults, configuredSamModelId());
     const samModelId = segmentation.sam_model_id;
-    await supabase
+    const { error: segmentationSaveError } = await supabase
       .from("copilot_photo_triage")
       .update({ segmentation: segmentation as unknown as Json })
       .eq("id", triage.id);
+    if (segmentationSaveError) {
+      console.error("[triage] segmentation save failed", segmentationSaveError);
+      return failRun("segmentation_save_failed", samModelId || null, triage.id);
+    }
 
     // 3. Interpretation pass: photo + SAM regions + note, forced into five fields.
     let interpretation: ReturnType<typeof interpretationSchema.parse>;
@@ -215,8 +228,9 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       .single();
     if (draftError || !draft) {
       console.error("[triage] draft insert failed", draftError);
-      await supabase.from("copilot_photo_triage").update({ status: "failed" }).eq("id", triage.id);
-      return { ok: false, error: "The draft couldn't be saved. Please try again." };
+      return failRun("draft_save_failed", interpretationModelId, triage.id, {
+        message: "The draft couldn't be saved. Please try again.",
+      });
     }
 
     const findings: FindingsRecord = {
@@ -248,10 +262,13 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
       .eq("id", triage.id);
     if (saveError) {
       console.error("[triage] findings save failed", saveError);
-      return { ok: false, error: "The triage result couldn't be saved. Please try again." };
+      return failRun("findings_save_failed", interpretationModelId, triage.id, {
+        message: "The triage result couldn't be saved. Please try again.",
+        detail: { draft_id: draft.id },
+      });
     }
 
-    await supabase.from("copilot_audit_log").insert({
+    const { error: auditError } = await supabase.from("copilot_audit_log").insert({
       draft_id: draft.id,
       tenant_id: tenant.id,
       action: "photo_triage",
@@ -268,6 +285,11 @@ export const runPhotoTriage = createServerFn({ method: "POST" })
         outcome: usable ? "findings" : "needs_clearer_photo",
       },
     });
+    if (auditError) {
+      // A run with no photo_triage record must not be reported as complete.
+      console.error("[triage] photo_triage audit insert failed", auditError);
+      return failRun("audit_failed", interpretationModelId, triage.id, { detail: { draft_id: draft.id } });
+    }
 
     return { ok: true, triageId: triage.id };
   });
@@ -371,12 +393,28 @@ export const approveWorkOrder = createServerFn({ method: "POST" })
     if (updateError) throw new Error("Could not approve the work order");
     if (!updated) throw new Error("This work order has already been approved");
 
-    await supabase.from("copilot_audit_log").insert({
+    const { error: auditError } = await supabase.from("copilot_audit_log").insert({
       tenant_id: row.tenant_id,
       action: "approve",
       model_id: null,
       detail: { kind: "work_order", triage_id: row.id, edited },
     });
+    if (auditError) {
+      // No approval without its record: put the work order back to pending.
+      console.error("[triage] work order approve audit insert failed", auditError);
+      const { error: revertError } = await supabase
+        .from("copilot_photo_triage")
+        .update({ findings: findings as unknown as Json })
+        .eq("id", row.id)
+        .eq("findings->work_order->>status", "approved");
+      if (revertError) {
+        console.error("[triage] reverting work order approval failed", revertError);
+        throw new Error(
+          "The work order was marked approved, but its audit record couldn't be written. Check the audit log before relying on it.",
+        );
+      }
+      throw new Error("Could not approve the work order");
+    }
 
     return next.work_order!;
   });
