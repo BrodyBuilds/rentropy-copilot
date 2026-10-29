@@ -22,7 +22,7 @@ Rules:
  * dates are copied exactly as given so the rule checks read the Spanish text unchanged.
  */
 export const SPANISH_DRAFT_INSTRUCTION = `Language: Spanish
-Write the entire message in Spanish — greeting, body, and sign-off — in clear, plain, respectful Spanish. Every rule above still applies. Copy every dollar amount exactly as written in the facts (same $ sign, commas, and cents) and every date exactly as written in the facts; do not translate, convert, or reformat amounts or dates. Keep the tenant's name exactly as written, and keep the sign-off placeholder "[Your name]" exactly as written.`;
+Write the entire message in Spanish — greeting, body, and sign-off — in clear, plain, respectful Spanish. Every rule above still applies. Copy every dollar amount exactly as written in the facts (same $ sign, commas, and cents) and every date exactly as written in the facts; do not translate, convert, or reformat amounts or dates. The rent due day is not a date: say it naturally in Spanish (for example "1st of each month" becomes "el día 1 de cada mes"). Keep the tenant's name exactly as written, and keep the sign-off placeholder "[Your name]" exactly as written.`;
 
 export function buildDraftInput(args: {
   facts: Fact[];
