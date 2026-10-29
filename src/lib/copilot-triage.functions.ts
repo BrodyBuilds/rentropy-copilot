@@ -358,6 +358,10 @@ export const getTriage = createServerFn({ method: "GET" })
 
 /* ---------- Work order: its own approve-and-copy ---------- */
 
+export const WORK_ORDER_COST_MESSAGE =
+  "A work order cannot include a cost estimate. Remove any prices or dollar amounts and approve again.";
+
+
 export const approveWorkOrder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
@@ -377,6 +381,8 @@ export const approveWorkOrder = createServerFn({ method: "POST" })
     const findings = row.findings as unknown as FindingsRecord | null;
     if (!findings?.work_order) throw new Error("This triage has no work order");
     if (findings.work_order.status !== "pending") throw new Error("This work order has already been approved");
+    // Same cost screen the generation path applies: an edit can't slip a cost in.
+    if (draftHasCost(data.body)) throw new Error(WORK_ORDER_COST_MESSAGE);
 
     const edited = data.body !== findings.work_order.body;
     const next: FindingsRecord = {
