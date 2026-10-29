@@ -477,7 +477,7 @@ function ComposePage() {
         </section>
       )}
 
-      <TenantQaPanel tenant={tenant} />
+      <TenantQaPanel key={tenant.id} tenant={tenant} />
     </div>
   );
 }

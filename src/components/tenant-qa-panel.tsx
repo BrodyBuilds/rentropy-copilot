@@ -3,7 +3,7 @@
 
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, Lock, MessageCircleQuestion } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,27 +28,49 @@ export function TenantQaPanel({ tenant }: { tenant: Pick<TenantRecord, "id" | "f
   const [answer, setAnswer] = useState<QaAnswer | null>(null);
   const [asked, setAsked] = useState("");
 
+  // When the tenant changes, wipe the question, answer and facts used during render,
+  // so one tenant's answer is never shown, even for a frame, under another's name.
+  const [scopeId, setScopeId] = useState(tenant.id);
+  if (scopeId !== tenant.id) {
+    setScopeId(tenant.id);
+    setQuestion("");
+    setAsking(false);
+    setError(null);
+    setRefusal(null);
+    setAnswer(null);
+    setAsked("");
+  }
+
+  // An answer that arrives after the tenant changed belongs to the old tenant: drop it.
+  const currentTenantId = useRef(tenant.id);
+  useEffect(() => {
+    currentTenantId.current = tenant.id;
+  }, [tenant.id]);
+
   const firstName = tenant.full_name.split(" ")[0] ?? tenant.full_name;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const q = question.trim();
     if (!q || asking) return;
+    const askedFor = tenant.id;
+    const stillSameTenant = () => currentTenantId.current === askedFor;
     setAsking(true);
     setError(null);
     setRefusal(null);
     setAnswer(null);
     try {
-      const res = await ask({ data: { tenant_id: tenant.id, question: q } });
+      const res = await ask({ data: { tenant_id: askedFor, question: q } });
+      if (!stillSameTenant()) return;
       setAsked(q);
       if (!res.ok) setError(res.error);
       else if (res.outcome === "refused") setRefusal(res.message);
       else setAnswer(res.answer);
     } catch (err) {
       console.error(err);
-      setError(QA_FAILED_MESSAGE);
+      if (stillSameTenant()) setError(QA_FAILED_MESSAGE);
     } finally {
-      setAsking(false);
+      if (stillSameTenant()) setAsking(false);
     }
   }
 
