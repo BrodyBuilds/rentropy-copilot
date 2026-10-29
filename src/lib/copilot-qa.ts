@@ -175,12 +175,29 @@ function words(s: string): string[] {
     .filter(Boolean);
 }
 
-/** True when the question names a tenant or property other than this tenant's. */
-export function isCrossScope(question: string, tenant: Pick<TenantRecord, "full_name" | "property_label">): boolean {
+/**
+ * True when the question names a tenant or property other than this tenant's.
+ * `otherTenantNames` are the other demo tenants' full names — names only, used
+ * for matching and never passed anywhere else. They match in any letter case,
+ * so "what does james carter owe" is refused just like "James Carter".
+ */
+export function isCrossScope(
+  question: string,
+  tenant: Pick<TenantRecord, "full_name" | "property_label">,
+  otherTenantNames: readonly string[] = [],
+): boolean {
   const q = question.normalize("NFKC");
   if (OTHER_SCOPE.test(q)) return true;
 
   const own = new Set([...words(tenant.full_name), ...words(tenant.property_label)]);
+
+  const otherNameWords = new Set(
+    otherTenantNames
+      .flatMap((name) => words(name.normalize("NFKC")))
+      .filter((w) => w.length >= 2 && !own.has(w) && !COMMON_WORDS.has(w)),
+  );
+  if (words(q).some((w) => otherNameWords.has(w))) return true;
+
   for (const m of q.matchAll(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}]*/gu)) {
     const word = m[0].toLowerCase();
     if (own.has(word) || COMMON_WORDS.has(word)) continue;
@@ -272,6 +289,10 @@ export function detectMissing(question: string): Missing[] {
   return out;
 }
 
+/** Phrases where "rent" only describes another topic (due day, balance), not the rent amount. */
+const RENT_AS_QUALIFIER =
+  /\brent\s+(?:is\s+|was\s+)?(?:due|late|overdue|past[- ]due|paid|unpaid|behind|outstanding|current|caught up|owed|owing|balance|arrears|payments?)\b|\b(?:late|overdue|past[- ]due|unpaid|back|behind on|caught up on|current on|owes?|owed|owing|pays?|paid|paying)\s+(?:(?:the|her|his|their|any|in|on)\s+)*rent\b|\brent\s+(?:does|did|do)\s+\w+\s+owe\b/g;
+
 export function detectTopics(question: string, missing: Missing[] = detectMissing(question)): Topic[] {
   const q = question.toLowerCase();
   const found = new Set<Topic>();
@@ -303,12 +324,15 @@ export function detectTopics(question: string, missing: Missing[] = detectMissin
   }
   if (/\b(termination|possession|move[- ]?out|moving out|vacat\w*|leaving)\b/.test(q)) found.add("move_out");
 
-  // Rent is mentioned in many questions about other facts ("when is rent due?");
-  // it only counts on its own, or when the question compares against it.
+  // Rent is mentioned in many questions about other facts ("when is rent due?",
+  // "is she behind on rent?"); there it only qualifies the other topic. Anywhere
+  // else ("what is her rent and balance?") rent is asked for in its own right,
+  // so it is kept alongside the other topics.
   if (/\brent\b|monthly (payment|amount)/.test(q)) {
     const others = [...found].filter((t) => t !== "summary").length;
     const compares = /(monthly rent|rent amount|amount of rent|how much (is|does) (the |her |his |their )?(monthly )?rent|rent (cost|price)|months? of rent|how many months|more than|less than|compare|versus|\bvs\b|equal|same as|times)/.test(q);
-    if (others === 0 || compares) found.add("rent");
+    const askedForItself = /\brent\b|monthly (payment|amount)/.test(q.replace(RENT_AS_QUALIFIER, " "));
+    if (others === 0 || compares || askedForItself) found.add("rent");
   }
 
   const order: Topic[] = ["summary", "balance", "rent", "due_day", "late_fee", "deposit_status", "lease_dates", "lease_start", "lease_end", "move_out"];
@@ -359,8 +383,12 @@ const RECORD_CONTENTS =
  * Decides, in code, how a question is answered. Only `needs_model` results
  * go to the model, and then only with the facts listed in the plan.
  */
-export function planAnswer(question: string, tenant: TenantRecord): QaPlan {
-  if (isCrossScope(question, tenant)) return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
+export function planAnswer(
+  question: string,
+  tenant: TenantRecord,
+  otherTenantNames: readonly string[] = [],
+): QaPlan {
+  if (isCrossScope(question, tenant, otherTenantNames)) return { kind: "refused", message: CROSS_SCOPE_MESSAGE };
 
   const missing = detectMissing(question);
   const topics = detectTopics(question, missing);
@@ -477,6 +505,15 @@ export function findDates(text: string): DateMention[] {
   });
   add(new RegExp(`\\b${MON}\\.?,?\\s+(\\d{4})\\b`, "gi"), (m) => ({ m: month(m[1]), y: num(m[2]) }));
   add(/\b((?:19|20)\d{2})\b/g, (m) => ({ y: num(m[1]) }));
+  // A bare month ("in February"). "May" only counts after a date word, since it is also a verb;
+  // abbreviations only count capitalised, since "mar" and "dec" can be ordinary words.
+  add(/\b(january|february|march|april|june|july|august|september|october|november|december)\b/gi, (m) => ({
+    m: month(m[1]),
+  }));
+  add(/\b(?:in|of|by|since|until|till|before|after|from|through|during|early|late|mid|end of)\s+(May)\b/g, (m) => ({
+    m: month(m[1]),
+  }));
+  add(/\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\b\.?/g, (m) => ({ m: month(m[1]) }));
   add(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, (m) => ({ d: num(m[1]) }));
   add(RELATIVE_DATE, () => ({}));
   return out.sort((a, b) => a.start - b.start);
@@ -504,15 +541,11 @@ export function verifyModelAnswer(answer: string, facts: QaFact[]): { ok: boolea
     if (!cents.has(money.cents)) mismatches.push(money.text);
   }
   for (const date of findDates(answer)) {
-    const stated = date.y !== undefined || date.m !== undefined || date.d !== undefined;
-    const matchesRowDate =
-      stated &&
-      dates.some(
-        (r) =>
-          (date.y === undefined || date.y === r.y) &&
-          (date.m === undefined || date.m === r.m) &&
-          (date.d === undefined || date.d === r.d),
-      );
+    // Only a full date (year, month and day) can verify, and only against the
+    // whole stored date. A bare year, bare month, or month-and-year that merely
+    // shares a part with a stored date is a mismatch.
+    const full = date.y !== undefined && date.m !== undefined && date.d !== undefined;
+    const matchesRowDate = full && dates.some((r) => date.y === r.y && date.m === r.m && date.d === r.d);
     const isDueDay =
       date.y === undefined && date.m === undefined && date.d !== undefined && dueDay !== undefined && date.d === Number(dueDay.raw);
     if (!matchesRowDate && !isDueDay) mismatches.push(date.text);
