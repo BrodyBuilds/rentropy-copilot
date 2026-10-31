@@ -153,13 +153,13 @@ function AuditPage() {
   );
 }
 
-function LabeledLines({ lines }: { lines: { label: string; value: string }[] }) {
+function LabeledLines({ lines }: { lines: { label: string; value: string; mono?: boolean }[] }) {
   return (
     <dl className="grid grid-cols-1 gap-x-8 gap-y-2.5 rounded-md border border-border bg-card px-4 py-3 sm:grid-cols-[max-content_1fr]">
       {lines.map((l) => (
         <Fragment key={l.label}>
           <dt className="console-label sm:pt-0.5">{l.label}</dt>
-          <dd className="break-words text-sm text-foreground">{l.value}</dd>
+          <dd className={cn("break-words text-sm text-foreground", l.mono && "num text-xs")}>{l.value}</dd>
         </Fragment>
       ))}
     </dl>
@@ -258,8 +258,8 @@ function LinkedDraft({ draftId }: { draftId: string }) {
           { label: "Message type", value: messageTypeLabel(draft.message_type) },
           { label: "Tone", value: toneLabel(draft.tone) },
           { label: "Language", value: draftLanguageLabel(draft.language) },
-          { label: "Created", value: formatTime(draft.created_at) },
-          { label: "Decided", value: draft.decided_at ? formatTime(draft.decided_at) : "Not decided yet" },
+          { label: "Created", value: formatTime(draft.created_at), mono: true },
+          { label: "Decided", value: draft.decided_at ? formatTime(draft.decided_at) : "Not decided yet", mono: !!draft.decided_at },
         ]}
       />
 
