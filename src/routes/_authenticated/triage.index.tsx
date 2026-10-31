@@ -149,9 +149,9 @@ function TriagePage() {
         lists what the photo can't tell you, and drafts replies for you to review.
       </p>
 
-      <section className="mt-6 rounded-lg border border-border bg-card p-5">
+      <section className="console-panel mt-6 p-5">
         <div role="radiogroup" aria-label="Tenant">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tenant</p>
+          <p className="console-label">Tenant</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {tenants.map((t) => (
               <button
@@ -162,10 +162,10 @@ function TriagePage() {
                 disabled={running}
                 onClick={() => setTenantId(t.id)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                  "rounded-md border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                   tenantId === t.id
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-background text-foreground hover:bg-secondary",
+                    ? "border-primary bg-accent font-semibold text-accent-foreground glow-primary"
+                    : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-secondary",
                 )}
               >
                 {t.full_name} · {t.property_label}
@@ -175,7 +175,7 @@ function TriagePage() {
         </div>
 
         <div role="radiogroup" aria-label="Tone" className="mt-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tone</p>
+          <p className="console-label">Tone</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {TONES.map((t) => (
               <button
@@ -186,10 +186,10 @@ function TriagePage() {
                 disabled={running}
                 onClick={() => setTone(t.value)}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+                  "rounded-md border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                   tone === t.value
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-background text-foreground hover:bg-secondary",
+                    ? "border-primary bg-accent font-semibold text-accent-foreground glow-primary"
+                    : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-secondary",
                 )}
               >
                 {t.label}
@@ -202,8 +202,8 @@ function TriagePage() {
         </div>
 
         <div className="mt-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Photo</p>
-          <label className="mt-2 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-border bg-background px-4 py-4 text-sm text-muted-foreground hover:bg-secondary">
+          <p className="console-label">Photo</p>
+          <label className="mt-2 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-input bg-background px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-secondary">
             <Camera className="h-5 w-5" />
             <span className="text-foreground">{photo ? photo.name : "Choose a JPG, PNG, or WebP photo (up to 10 MB)"}</span>
             <input
@@ -220,7 +220,7 @@ function TriagePage() {
         <div className="mt-5">
           <label
             htmlFor="triage-note"
-            className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+            className="console-label"
           >
             Tenant's note (optional)
           </label>
@@ -250,7 +250,7 @@ function TriagePage() {
         </div>
 
         {error && (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
             <span>{error}</span>
             <Button size="sm" variant="outline" onClick={submit} disabled={running || !photo}>
               Retry
@@ -260,17 +260,17 @@ function TriagePage() {
       </section>
 
       <h2 className="mt-10 text-lg font-semibold text-foreground">Earlier photos</h2>
-      <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+      <ul className="console-panel mt-3 divide-y divide-border overflow-hidden">
         {runs.map((r) => (
           <li key={r.id}>
             <Link
               to="/triage/$triageId"
               params={{ triageId: r.id }}
-              className="flex items-center justify-between gap-4 px-5 py-3 transition-colors hover:bg-secondary"
+              className="flex items-center justify-between gap-4 border-l-2 border-l-transparent px-5 py-3 transition-colors hover:border-l-primary hover:bg-secondary"
             >
               <div>
                 <p className="font-medium text-foreground">{r.tenant_name ?? "—"}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="num text-[11px] text-muted-foreground">
                   {new Date(r.created_at).toLocaleString("en-US", {
                     dateStyle: "medium",
                     timeStyle: "short",
@@ -278,7 +278,7 @@ function TriagePage() {
                   · looked for: {r.concept_prompt}
                 </p>
               </div>
-              <div className="flex items-center gap-3 text-sm">
+              <div className="flex items-center gap-3 text-sm font-medium">
                 <span
                   className={cn(
                     r.status === "failed" || r.status === "processing"

@@ -280,19 +280,20 @@ function ComposePage() {
       <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-foreground">{tenant.full_name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {tenant.property_label} · Lease {formatDate(tenant.lease_start)} –{" "}
-            {formatDate(tenant.lease_end)}
+          <p className="mt-1 text-sm text-muted-foreground">
+            {tenant.property_label} · Lease{" "}
+            <span className="num text-foreground/90">{formatDate(tenant.lease_start)}</span> –{" "}
+            <span className="num text-foreground/90">{formatDate(tenant.lease_end)}</span>
           </p>
         </div>
-        <div className="flex gap-6 text-sm">
+        <div className="console-panel flex divide-x divide-border text-sm">
           <Stat label="Rent" value={formatCents(tenant.rent_cents)} />
           <Stat label="Balance" value={formatCents(tenant.balance_cents)} />
           <Stat label="Deposit" value={tenant.deposit_status} />
         </div>
       </div>
 
-      <section className="mt-8 rounded-lg border border-border bg-card p-5">
+      <section className="console-panel mt-8 p-5">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
           <ChoiceRow
             label="Message type"
@@ -330,7 +331,7 @@ function ComposePage() {
           )}
         </div>
         {error && (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
             <span>{error}</span>
             <Button size="sm" variant="outline" onClick={runDraft} disabled={drafting}>
               Retry
@@ -341,7 +342,7 @@ function ComposePage() {
 
       {draft && (
         <section className="mt-6 grid gap-6 md:grid-cols-[1fr_280px]">
-          <div className="rounded-lg border border-border bg-card p-5">
+          <div className="console-panel p-5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-foreground">
                 {draftHeading(draftLanguage)}
@@ -353,7 +354,7 @@ function ComposePage() {
               onChange={(e) => updateBody(e.target.value)}
               readOnly={!isPending}
               rows={12}
-              className="mt-4 resize-y bg-background leading-relaxed"
+              className="mt-4 resize-y bg-background text-[15px] leading-7"
               aria-label="Draft message"
             />
 
@@ -410,17 +411,20 @@ function ComposePage() {
             )}
 
             {isPending && confirmHigh && (
-              <p className="mt-3 flex items-center gap-2 text-sm text-destructive" role="alert">
+              <p
+                className="mt-3 flex items-center gap-2 rounded-md border border-destructive/60 bg-destructive/15 px-3 py-2 text-sm font-semibold text-destructive"
+                role="alert"
+              >
                 <AlertTriangle className="h-4 w-4" />
                 {highCount} high-severity flag{highCount === 1 ? " is" : "s are"} showing. Click
                 “Approve anyway” to approve — the decision is yours.
               </p>
             )}
 
-            <div className="mt-5 rounded-md border border-border p-4">
+            <div className="mt-5 rounded-md border border-border bg-background/40 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <ShieldCheck className="h-4 w-4" /> Risk check
+                <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.1em] text-foreground">
+                  <ShieldCheck className="h-4 w-4 text-primary" /> Risk check
                 </h3>
                 {isPending && !(risk && risk.status === "partial") && (
                   <Button
@@ -457,7 +461,7 @@ function ComposePage() {
             </div>
           </div>
 
-          <aside className="rounded-lg border border-border bg-card p-5">
+          <aside className="console-panel h-fit p-5">
             <h2 className="text-lg font-semibold text-foreground">Facts used</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Check each value against the tenant record before approving.
@@ -465,8 +469,8 @@ function ComposePage() {
             <dl className="mt-4 space-y-3">
               {facts.map((f) => (
                 <div key={f.field} className="border-b border-border pb-3 last:border-0 last:pb-0">
-                  <dt className="text-xs text-muted-foreground">{f.label}</dt>
-                  <dd className="font-medium text-foreground">{f.value}</dd>
+                  <dt className="console-label">{f.label}</dt>
+                  <dd className="num mt-0.5 text-[15px] font-semibold text-foreground">{f.value}</dd>
                   <dd className="mt-0.5 font-mono text-[11px] text-muted-foreground">
                     demo_tenants.{f.field}
                   </dd>
@@ -519,10 +523,10 @@ function RiskStatus({
   return (
     <span
       className={cn(
-        "ml-1 text-xs",
+        "ml-1 rounded-sm px-2 py-1 text-xs",
         tone === "muted" && "text-muted-foreground",
-        tone === "warn" && "font-medium text-warning-foreground",
-        tone === "bad" && "font-medium text-destructive",
+        tone === "warn" && "bg-warning font-semibold text-warning-foreground",
+        tone === "bad" && "bg-destructive/15 font-bold text-destructive ring-1 ring-destructive/60",
       )}
     >
       {text}
@@ -532,9 +536,9 @@ function RiskStatus({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <p className="text-muted-foreground">{label}</p>
-      <p className="font-medium capitalize text-foreground">{value}</p>
+    <div className="px-4 py-2.5">
+      <p className="console-label">{label}</p>
+      <p className="num mt-0.5 font-semibold capitalize text-foreground">{value}</p>
     </div>
   );
 }
@@ -542,20 +546,20 @@ function Stat({ label, value }: { label: string; value: string }) {
 function StatusBadge({ status }: { status: string }) {
   if (status === "approved") {
     return (
-      <span className="rounded-full bg-success px-3 py-1 text-xs font-medium text-success-foreground">
+      <span className="num rounded-sm border border-success-foreground/40 bg-success px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-success-foreground">
         Approved — ready to copy
       </span>
     );
   }
   if (status === "discarded") {
     return (
-      <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+      <span className="num rounded-sm border border-border bg-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         Discarded
       </span>
     );
   }
   return (
-    <span className="rounded-full bg-warning px-3 py-1 text-xs font-medium text-warning-foreground">
+    <span className="num rounded-sm border border-primary/50 bg-accent px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-accent-foreground">
       Pending approval — not sent
     </span>
   );
@@ -576,7 +580,7 @@ function ChoiceRow<T extends string>({
 }) {
   return (
     <div role="radiogroup" aria-label={label}>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="console-label">{label}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {options.map((o) => (
           <button
@@ -587,10 +591,10 @@ function ChoiceRow<T extends string>({
             disabled={disabled}
             onClick={() => onChange(o.value)}
             className={cn(
-              "rounded-full border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+              "rounded-md border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60",
               value === o.value
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-background text-foreground hover:bg-secondary",
+                ? "border-primary bg-accent font-semibold text-accent-foreground glow-primary"
+                : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-secondary",
             )}
           >
             {o.label}

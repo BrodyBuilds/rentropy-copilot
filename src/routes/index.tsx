@@ -49,9 +49,12 @@ function Index() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-6">
-      <div className="w-full max-w-md">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Demo</p>
-        <h1 className="mt-3 text-4xl font-semibold text-foreground">Rentropy Copilot</h1>
+      <div className="console-panel w-full max-w-md border-t-2 border-t-primary p-8">
+        <p className="num flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+          <span aria-hidden className="glow-primary h-2 w-2 rounded-full bg-primary" />
+          Demo
+        </p>
+        <h1 className="mt-4 text-4xl font-semibold uppercase tracking-[0.06em] text-foreground">Rentropy Copilot</h1>
         <p className="mt-3 text-base leading-relaxed text-muted-foreground">
           Draft tenant messages with AI. Every draft waits for your approval, lists the facts it
           used, and is never sent for you.

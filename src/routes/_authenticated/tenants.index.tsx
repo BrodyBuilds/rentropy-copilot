@@ -33,13 +33,13 @@ function TenantsPage() {
       <h1 className="text-3xl font-semibold text-foreground">Tenants</h1>
       <p className="mt-1 text-sm text-muted-foreground">Pick a tenant to draft a message.</p>
 
-      <ul className="mt-6 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+      <ul className="console-panel mt-6 divide-y divide-border overflow-hidden">
         {tenants.map((t) => (
           <li key={t.id}>
             <Link
               to="/tenants/$tenantId"
               params={{ tenantId: t.id }}
-              className="flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-secondary"
+              className="group flex items-center justify-between gap-4 border-l-2 border-l-transparent px-5 py-4 transition-colors hover:border-l-primary hover:bg-secondary"
             >
               <div>
                 <p className="font-medium text-foreground">{t.full_name}</p>
@@ -47,14 +47,14 @@ function TenantsPage() {
               </div>
               <div className="flex items-center gap-6 text-sm">
                 <div className="text-right">
-                  <p className="text-muted-foreground">Rent</p>
-                  <p className="font-medium text-foreground">{formatCents(t.rent_cents)}</p>
+                  <p className="console-label">Rent</p>
+                  <p className="num font-semibold text-foreground">{formatCents(t.rent_cents)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-muted-foreground">Balance</p>
-                  <p className="font-medium text-foreground">{formatCents(t.balance_cents)}</p>
+                  <p className="console-label">Balance</p>
+                  <p className="num font-semibold text-foreground">{formatCents(t.balance_cents)}</p>
                 </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
               </div>
             </Link>
           </li>

@@ -75,9 +75,9 @@ export function TenantQaPanel({ tenant }: { tenant: Pick<TenantRecord, "id" | "f
   }
 
   return (
-    <section className="mt-6 rounded-lg border border-border bg-card p-5" aria-labelledby="tenant-qa-heading">
+    <section className="console-panel mt-6 p-5" aria-labelledby="tenant-qa-heading">
       <h2 id="tenant-qa-heading" className="flex items-center gap-2 text-lg font-semibold text-foreground">
-        <MessageCircleQuestion className="h-5 w-5" /> Ask about this tenant
+        <MessageCircleQuestion className="h-5 w-5 text-primary" /> Ask about this tenant
       </h2>
       <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
         <Lock className="h-3.5 w-3.5" /> Read-only — answers come only from this tenant's record
@@ -98,32 +98,32 @@ export function TenantQaPanel({ tenant }: { tenant: Pick<TenantRecord, "id" | "f
       </form>
 
       {error && (
-        <p className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
+        <p className="mt-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive" role="alert">
           {error}
         </p>
       )}
 
       {refusal && (
-        <p className="mt-4 flex items-start gap-2 rounded-md border border-border bg-warning px-4 py-3 text-sm text-warning-foreground" role="status">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <p className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-input bg-secondary px-4 py-3 text-sm text-foreground" role="status">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           {refusal}
         </p>
       )}
 
       {answer && (
-        <div className="mt-4 rounded-md border border-border bg-background p-4" role="status">
+        <div className="mt-4 rounded-md border border-border border-l-2 border-l-primary bg-background p-4" role="status">
           <p className="text-xs text-muted-foreground">“{asked}”</p>
           <p className="mt-2 leading-relaxed text-foreground">{answer.answer}</p>
           <p className="mt-2 text-xs text-muted-foreground">{SOURCE_NOTE[answer.kind]}</p>
           <div className="mt-3 border-t border-border pt-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Facts used</p>
+            <p className="console-label">Facts used</p>
             {answer.facts.length === 0 ? (
               <p className="mt-1 text-sm text-muted-foreground">None — nothing in the record answers this.</p>
             ) : (
               <ul className="mt-1 space-y-1">
                 {answer.facts.map((f) => (
                   <li key={f.field} className="text-sm text-foreground">
-                    {f.label}: <span className="font-medium">{f.value}</span>{" "}
+                    {f.label}: <span className="num font-semibold">{f.value}</span>{" "}
                     <span className="font-mono text-[11px] text-muted-foreground">
                       demo_tenants.{f.field} = {String(f.raw)}
                     </span>

@@ -104,19 +104,21 @@ function TriageResultPage() {
       <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-foreground">{tenant?.full_name ?? "Photo"}</h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             {tenant?.property_label} ·{" "}
-            {new Date(triage.created_at).toLocaleString("en-US", {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}{" "}
+            <span className="num text-foreground/90">
+              {new Date(triage.created_at).toLocaleString("en-US", {
+                dateStyle: "medium",
+                timeStyle: "short",
+              })}
+            </span>{" "}
             · looked for: {triage.concept_prompt}
           </p>
         </div>
       </div>
 
       {(triage.status === "failed" || triage.status === "processing") && (
-        <div className="mt-6 flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="mt-6 flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
           <AlertTriangle className="h-4 w-4" />
           This photo triage couldn't finish, so there are no findings. Run it again from the Photo
           triage page.
@@ -124,7 +126,7 @@ function TriageResultPage() {
       )}
 
       <section className="mt-6 grid gap-6 md:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="console-panel p-4">
           {triage.photoUrl ? (
             <PhotoWithRegions url={triage.photoUrl} regions={regions} />
           ) : (
@@ -139,7 +141,7 @@ function TriageResultPage() {
               ) : (
                 <ul className="flex flex-wrap gap-2">
                   {regions.map((r) => (
-                    <li key={r.n} className="rounded-full border border-border px-2 py-0.5">
+                    <li key={r.n} className="num rounded-sm border border-primary/40 bg-accent/60 px-2 py-0.5 text-accent-foreground">
                       Region {r.n}: {r.concept}
                       {r.c !== null && ` · ${Math.round(r.c * 100)}%`}
                     </li>
@@ -154,16 +156,16 @@ function TriageResultPage() {
         {findings && (
           <aside className="space-y-4">
             {findings.note && (
-              <div className="rounded-lg border border-border bg-card p-4">
-                <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="console-panel p-4">
+                <h2 className="console-label">
                   Tenant's note
                 </h2>
                 <p className="mt-1 text-sm text-foreground">“{findings.note}”</p>
               </div>
             )}
-            <div className="rounded-lg border border-border bg-card p-4">
-              <h2 className="text-sm font-semibold text-foreground">Urgency and routing</h2>
-              <p className="mt-1 text-sm font-medium text-foreground">
+            <div className="console-panel border-l-2 border-l-primary p-4">
+              <h2 className="console-label">Urgency and routing</h2>
+              <p className="mt-1.5 text-base font-semibold text-foreground">
                 {findings.urgency_routing.urgency
                   ? urgencyLabel(findings.urgency_routing.urgency)
                   : "Not determinable from this photo"}
@@ -190,7 +192,7 @@ function TriageResultPage() {
                     <p className="text-foreground">{f.what}</p>
                     {f.where && <p className="text-muted-foreground">Where: {f.where}</p>}
                     {f.regions.length > 0 && (
-                      <p className="mt-1 text-xs text-primary">
+                      <p className="num mt-1 text-[11px] font-medium text-primary">
                         SAM {f.regions.length === 1 ? "region" : "regions"} {f.regions.join(", ")}
                       </p>
                     )}
@@ -259,7 +261,7 @@ function TriageResultPage() {
                   onChange={(e) => setOrderBody(e.target.value)}
                   readOnly={workOrder.status !== "pending"}
                   rows={8}
-                  className="bg-background leading-relaxed"
+                  className="bg-background text-[15px] leading-7"
                   aria-label="Work order summary"
                 />
                 <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -270,7 +272,7 @@ function TriageResultPage() {
                     </Button>
                   ) : (
                     <>
-                      <span className="rounded-full bg-success px-3 py-1 text-xs font-medium text-success-foreground">
+                      <span className="num rounded-sm border border-success-foreground/40 bg-success px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-success-foreground">
                         Approved — ready to copy
                       </span>
                       <Button variant="outline" size="sm" onClick={() => copy(workOrder.body)}>
@@ -306,7 +308,7 @@ function PhotoWithRegions({ url, regions }: { url: string; regions: TriageRegion
       {regions.map((r) => (
         <div
           key={r.n}
-          className="pointer-events-none absolute rounded-sm border-2 border-primary bg-primary/10"
+          className="glow-primary pointer-events-none absolute rounded-sm border-2 border-primary bg-primary/10"
           style={{
             left: pct(r.x1, r.w),
             top: pct(r.y1, r.h),
@@ -314,7 +316,7 @@ function PhotoWithRegions({ url, regions }: { url: string; regions: TriageRegion
             height: pct(r.y2 - r.y1, r.h),
           }}
         >
-          <span className="absolute left-0 top-0 rounded-br-sm bg-primary px-1.5 py-0.5 text-[11px] font-medium leading-none text-primary-foreground">
+          <span className="num absolute left-0 top-0 rounded-br-sm bg-primary px-1.5 py-0.5 text-[11px] font-bold leading-none text-primary-foreground">
             {r.n}
           </span>
         </div>
@@ -325,8 +327,8 @@ function PhotoWithRegions({ url, regions }: { url: string; regions: TriageRegion
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <h2 className="mb-2 text-sm font-semibold text-foreground">{title}</h2>
+    <div className="console-panel p-4">
+      <h2 className="console-label mb-3 border-b border-border pb-2">{title}</h2>
       {children}
     </div>
   );
@@ -335,7 +337,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 function PlainList({ items, empty }: { items: string[]; empty: string }) {
   if (items.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
   return (
-    <ul className={cn("list-disc space-y-1.5 pl-4 text-sm text-foreground")}>
+    <ul className={cn("list-disc space-y-1.5 pl-4 text-sm text-foreground marker:text-primary")}>
       {items.map((item, i) => (
         <li key={i}>{item}</li>
       ))}
