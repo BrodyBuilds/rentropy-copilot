@@ -130,3 +130,38 @@ describe("callSegmentation", () => {
     expect(responsesUrl("https://api.example.test/v1/chat/completions")).toBe("https://api.example.test/v1/responses");
   });
 });
+
+describe("callTranscription", () => {
+  it("POSTs multipart request + audio to {base}/asr/transcribe and returns the transcript verbatim", async () => {
+    const { callTranscription } = await import("./copilot-model.server");
+    setEnv({ META_MODEL_API_KEY: "test-key", META_MODEL_API_BASE_URL: "https://api.example.test/v1/", META_VOICE_MODEL_ID: "voice-test-model" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ sessionId: "s1", transcript: " it's dripping.. ", audioDurationMs: 1200, turns: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await callTranscription(new Blob([new Uint8Array(8)], { type: "audio/wav" }));
+    expect(result).toEqual({ transcript: " it's dripping.. ", modelId: "voice-test-model", audioDurationMs: 1200, sessionId: "s1" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.example.test/v1/asr/transcribe");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-key");
+    const form = init.body as FormData;
+    expect(JSON.parse(await (form.get("request") as Blob).text())).toEqual({
+      model: "voice-test-model",
+      audioEncoding: "WAV",
+      mode: "PUSH_TO_TALK",
+    });
+    expect(form.get("audio")).toBeInstanceOf(Blob);
+  });
+
+  it("fails with not_configured and never calls the API when META_VOICE_MODEL_ID is missing", async () => {
+    const { callTranscription } = await import("./copilot-model.server");
+    setEnv({ META_MODEL_API_KEY: "test-key", META_MODEL_API_BASE_URL: "https://api.example.test/v1", META_VOICE_MODEL_ID: "" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const err = await callTranscription(new Blob([])).catch((e: unknown) => e);
+    expect((err as ModelCallError).code).toBe("not_configured");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
