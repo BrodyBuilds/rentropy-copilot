@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { VoiceNoteAttach } from "@/components/voice-note-attach";
 import { listTenants } from "@/lib/copilot.functions";
 import { TONES, type Tone } from "@/lib/copilot-shared";
 import { listTriages, runPhotoTriage } from "@/lib/copilot-triage.functions";
@@ -48,6 +49,16 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const MAX_UPLOAD_BYTES = 250 * 1024;
+const MAX_NOTE_CHARS = 500;
+
+/**
+ * Typed notes stay capped at 500 characters as before. A longer voice transcript is kept
+ * whole (never cut) and can only be shortened until it fits.
+ */
+function nextNoteValue(current: string, next: string): string {
+  if (current.length <= MAX_NOTE_CHARS) return next.slice(0, MAX_NOTE_CHARS);
+  return next.length <= current.length ? next : current;
+}
 
 /** Shrink a photo in the browser to a JPEG of at most ~250 KB; falls back to the original if it can't be decoded. */
 async function shrinkPhoto(file: File): Promise<File> {
@@ -114,6 +125,9 @@ function TriagePage() {
   const [tone, setTone] = useState<Tone>("friendly");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribedBy, setTranscribedBy] = useState<string | null>(null);
+  const noteTooLong = note.length > MAX_NOTE_CHARS;
 
   async function submit() {
     if (!photo || !tenantId) return;
@@ -201,20 +215,31 @@ function TriagePage() {
           </p>
         </div>
 
-        <div className="mt-5">
-          <p className="console-label">Photo</p>
-          <label className="mt-2 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-input bg-background px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-secondary">
-            <Camera className="h-5 w-5" />
-            <span className="text-foreground">{photo ? photo.name : "Choose a JPG, PNG, or WebP photo (up to 10 MB)"}</span>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
-              aria-label="Maintenance photo"
-              disabled={running}
-              onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-            />
-          </label>
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
+          <div>
+            <p className="console-label">Photo</p>
+            <label className="mt-2 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-input bg-background px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-secondary">
+              <Camera className="h-5 w-5" />
+              <span className="text-foreground">{photo ? photo.name : "Choose a JPG, PNG, or WebP photo (up to 10 MB)"}</span>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                aria-label="Maintenance photo"
+                disabled={running}
+                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
+          <VoiceNoteAttach
+            tenantId={tenantId}
+            disabled={running}
+            onBusyChange={setTranscribing}
+            onTranscribed={(transcript, modelId) => {
+              setNote(transcript);
+              setTranscribedBy(modelId);
+            }}
+          />
         </div>
 
         <div className="mt-5">
@@ -227,12 +252,23 @@ function TriagePage() {
           <Textarea
             id="triage-note"
             value={note}
-            onChange={(e) => setNote(e.target.value.slice(0, 500))}
-            disabled={running}
+            onChange={(e) => setNote(nextNoteValue(note, e.target.value))}
+            disabled={running || transcribing}
             rows={3}
             placeholder="e.g. There's a brown stain on the bathroom ceiling and it's dripping"
             className="mt-2 bg-background"
           />
+          {transcribedBy && note && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Transcribed from the voice note by <span className="num text-foreground">{transcribedBy}</span>
+            </p>
+          )}
+          {noteTooLong && (
+            <p className="mt-1 text-xs font-medium text-warning-foreground">
+              <span className="num">{note.length}</span> characters — the note takes up to{" "}
+              <span className="num">{MAX_NOTE_CHARS}</span>. Shorten it before running photo triage.
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted-foreground">
             The note picks what to look for (up to three things). With no note, Copilot looks for a
             water stain.
@@ -240,7 +276,7 @@ function TriagePage() {
         </div>
 
         <div className="mt-5 flex items-center gap-3">
-          <Button onClick={submit} disabled={running || !photo || !tenantId}>
+          <Button onClick={submit} disabled={running || transcribing || noteTooLong || !photo || !tenantId}>
             <ScanSearch className="h-4 w-4" />
             {running ? "Reading the photo…" : "Run photo triage"}
           </Button>
