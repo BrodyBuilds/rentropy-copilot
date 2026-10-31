@@ -58,14 +58,14 @@ function AuditPage() {
         Read-only, oldest first. Click an entry to see everything it recorded.
       </p>
 
-      <div className="mt-6 overflow-hidden rounded-lg border border-border bg-card">
+      <div className="console-panel mt-6 overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="bg-secondary text-xs uppercase tracking-wide text-muted-foreground">
+          <thead className="border-b border-border bg-secondary/70">
             <tr>
-              <th className="px-4 py-3 font-medium">Time</th>
-              <th className="px-4 py-3 font-medium">Tenant</th>
-              <th className="px-4 py-3 font-medium">Action</th>
-              <th className="px-4 py-3 font-medium">Model</th>
+              <th className="console-label px-4 py-2.5 font-medium">Time</th>
+              <th className="console-label px-4 py-2.5 font-medium">Tenant</th>
+              <th className="console-label px-4 py-2.5 font-medium">Action</th>
+              <th className="console-label px-4 py-2.5 font-medium">Model</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -74,37 +74,49 @@ function AuditPage() {
               return (
                 <Fragment key={r.id}>
                   <tr
-                    className={cn("cursor-pointer hover:bg-secondary/60", expanded && "bg-secondary/40")}
+                    className={cn(
+                      "cursor-pointer transition-colors hover:bg-secondary/60",
+                      expanded && "bg-accent/40 hover:bg-accent/50",
+                    )}
                     onClick={() => toggle(r.id)}
                   >
-                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                    <td
+                      className={cn(
+                        "whitespace-nowrap px-4 py-2.5 align-top text-muted-foreground",
+                        r.action === "model_error"
+                          ? "shadow-[inset_3px_0_0_var(--color-destructive)]"
+                          : expanded
+                            ? "shadow-[inset_3px_0_0_var(--color-primary)]"
+                            : "shadow-[inset_3px_0_0_transparent]",
+                      )}
+                    >
                       <button
                         type="button"
                         aria-expanded={expanded}
                         aria-controls={`audit-detail-${r.id}`}
-                        className="inline-flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                        className="num inline-flex items-center gap-1.5 rounded-sm text-left text-xs text-foreground/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggle(r.id);
                         }}
                       >
                         {expanded ? (
-                          <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                          <ChevronDown className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                         ) : (
-                          <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                         )}
                         {formatTime(r.created_at)}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-foreground">{r.tenant_name ?? "—"}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2.5 align-top text-foreground">{r.tenant_name ?? "—"}</td>
+                    <td className="px-4 py-2.5 align-top">
                       <span
                         className={
                           r.action === "model_error"
-                            ? "text-destructive"
+                            ? "font-semibold text-destructive"
                             : r.action === "approve" || r.action === "approved_after_partial_review"
-                              ? "text-success-foreground"
-                              : "text-foreground"
+                              ? "font-medium text-success-foreground"
+                              : "font-medium text-foreground"
                         }
                       >
                         {actionLabel(r.action)}
@@ -113,13 +125,13 @@ function AuditPage() {
                         <span className="block text-xs text-muted-foreground">{r.detail}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                    <td className="num px-4 py-2.5 align-top text-[11px] text-muted-foreground">
                       {r.model_id ?? "—"}
                     </td>
                   </tr>
                   {expanded && (
                     <tr id={`audit-detail-${r.id}`} className="bg-background">
-                      <td colSpan={4} className="px-4 py-4">
+                      <td colSpan={4} className="px-6 py-5 shadow-[inset_3px_0_0_var(--color-primary)]">
                         <EntryDetail row={r} />
                       </td>
                     </tr>
@@ -143,13 +155,11 @@ function AuditPage() {
 
 function LabeledLines({ lines }: { lines: { label: string; value: string }[] }) {
   return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-[max-content_1fr]">
+    <dl className="grid grid-cols-1 gap-x-8 gap-y-2.5 rounded-md border border-border bg-card px-4 py-3 sm:grid-cols-[max-content_1fr]">
       {lines.map((l) => (
         <Fragment key={l.label}>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground sm:pt-0.5">
-            {l.label}
-          </dt>
-          <dd className="break-words text-foreground">{l.value}</dd>
+          <dt className="console-label sm:pt-0.5">{l.label}</dt>
+          <dd className="break-words text-sm text-foreground">{l.value}</dd>
         </Fragment>
       ))}
     </dl>
@@ -157,7 +167,12 @@ function LabeledLines({ lines }: { lines: { label: string; value: string }[] }) 
 }
 
 function SectionTitle({ children }: { children: string }) {
-  return <h3 className="mb-2 text-sm font-semibold text-foreground">{children}</h3>;
+  return (
+    <h3 className="num mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">
+      <span aria-hidden className="h-px w-3 bg-primary" />
+      {children}
+    </h3>
+  );
 }
 
 function EntryDetail({ row }: { row: AuditRow }) {
@@ -180,7 +195,7 @@ function EntryDetail({ row }: { row: AuditRow }) {
       <section>
         <SectionTitle>Full record</SectionTitle>
         {record ? (
-          <pre className="max-h-80 overflow-auto rounded-md border border-border bg-secondary p-3 font-mono text-xs text-foreground whitespace-pre-wrap break-words">
+          <pre className="num max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-card p-3 text-xs leading-5 text-foreground/90">
             {record}
           </pre>
         ) : (
@@ -248,12 +263,12 @@ function LinkedDraft({ draftId }: { draftId: string }) {
         ]}
       />
 
-      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">Message text</p>
-      <div className="mt-1 whitespace-pre-wrap rounded-md border border-border bg-card p-3 text-foreground">
+      <p className="console-label mt-4">Message text</p>
+      <div className="mt-1 whitespace-pre-wrap rounded-md border border-border bg-card p-3 text-[15px] leading-7 text-foreground">
         {draft.draft_body}
       </div>
 
-      <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">Risk check</p>
+      <p className="console-label mt-4">Risk check</p>
       {!risk ? (
         <p className="mt-1 text-muted-foreground">
           {draft.risk_checked_at ? "The stored risk result can't be read." : "Risk check has not run on this text."}
@@ -265,11 +280,13 @@ function LinkedDraft({ draftId }: { draftId: string }) {
               ? "Incomplete — rule checks ran, the language review did not run"
               : "Complete — rule checks and language review ran"}
             {draft.risk_checked_at && (
-              <span className="text-muted-foreground"> · checked {formatTime(draft.risk_checked_at)}</span>
+              <span className="text-muted-foreground">
+                {" "}· checked <span className="num text-xs">{formatTime(draft.risk_checked_at)}</span>
+              </span>
             )}
           </p>
           {risk.checked_body !== draft.draft_body && (
-            <p className="text-sm text-warning-foreground">
+            <p className="rounded-sm bg-warning px-2 py-1 text-sm font-semibold text-warning-foreground">
               The check ran on an earlier version of this text.
             </p>
           )}
@@ -278,12 +295,25 @@ function LinkedDraft({ draftId }: { draftId: string }) {
           ) : (
             <ul className="space-y-2">
               {flags.map((f) => (
-                <li key={f.id} className="rounded-md border border-border bg-card p-3">
+                <li
+                  key={f.id}
+                  className={cn(
+                    "rounded-md border border-l-4 border-border bg-card p-3",
+                    f.severity === "high" && "border-l-destructive",
+                    f.severity === "medium" && "border-l-warning-foreground",
+                    f.severity === "low" && "border-l-accent-foreground/50",
+                  )}
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <SeverityBadge severity={f.severity} />
-                    <span className="text-sm font-medium text-foreground">{categoryLabel(f.category)}</span>
+                    <span className="text-sm font-semibold text-foreground">{categoryLabel(f.category)}</span>
                   </div>
-                  <blockquote className="mt-2 border-l-2 border-border pl-3 text-foreground">
+                  <blockquote
+                    className={cn(
+                      "mt-2 pl-1 text-foreground",
+                      f.severity === "high" && "font-semibold",
+                    )}
+                  >
                     “{f.quote}”
                   </blockquote>
                 </li>
