@@ -252,7 +252,11 @@ function TriagePage() {
           <Textarea
             id="triage-note"
             value={note}
-            onChange={(e) => setNote(nextNoteValue(note, e.target.value))}
+            onChange={(e) => {
+              const next = nextNoteValue(note, e.target.value);
+              setNote(next);
+              if (!next) setTranscribedBy(null);
+            }}
             disabled={running || transcribing}
             rows={3}
             placeholder="e.g. There's a brown stain on the bathroom ceiling and it's dripping"
@@ -288,7 +292,7 @@ function TriagePage() {
         {error && (
           <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
             <span>{error}</span>
-            <Button size="sm" variant="outline" onClick={submit} disabled={running || !photo}>
+            <Button size="sm" variant="outline" onClick={submit} disabled={running || transcribing || noteTooLong || !photo}>
               Retry
             </Button>
           </div>
