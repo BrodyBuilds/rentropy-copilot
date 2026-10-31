@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Runs the real transcribeVoiceNote handler with a stand-in createServerFn, auth
