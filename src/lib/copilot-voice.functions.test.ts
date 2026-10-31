@@ -1,4 +1,5 @@
-// @vitest-environment node
+import { Blob as NodeBlob } from "node:buffer";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Runs the real transcribeVoiceNote handler with a stand-in createServerFn, auth
@@ -50,7 +51,8 @@ const PATH = voiceNotePath(USER, TENANT, "44444444-4444-4444-8444-444444444444")
 function fakeSupabase() {
   const audits: Array<Record<string, unknown>> = [];
   const writes: string[] = [];
-  const wav = new Blob([encodeWavMono16(new Float32Array(24_000), 24_000)], { type: "audio/wav" });
+  // Node's Blob (as on the server runtime); the test DOM's Blob has no arrayBuffer().
+  const wav = new NodeBlob([encodeWavMono16(new Float32Array(24_000), 24_000)], { type: "audio/wav" });
   const client = {
     storage: { from: () => ({ download: async () => ({ data: wav, error: null }) }) },
     from(table: string) {

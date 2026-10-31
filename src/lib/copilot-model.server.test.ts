@@ -147,7 +147,12 @@ describe("callTranscription", () => {
     expect(url).toBe("https://api.example.test/v1/asr/transcribe");
     expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-key");
     const form = init.body as FormData;
-    expect(JSON.parse(await (form.get("request") as Blob).text())).toEqual({
+    const requestText = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(form.get("request") as Blob);
+    });
+    expect(JSON.parse(requestText)).toEqual({
       model: "voice-test-model",
       audioEncoding: "WAV",
       mode: "PUSH_TO_TALK",
