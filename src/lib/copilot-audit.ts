@@ -14,6 +14,7 @@ export const ACTION_LABELS: Record<string, string> = {
   risk_check: "Risk check",
   photo_triage: "Photo triage",
   qa: "Tenant Q&A",
+  voice_transcribe: "Voice transcription",
 };
 
 export function actionLabel(action: string): string {
@@ -28,6 +29,7 @@ const STAGE_LABELS: Record<string, string> = {
   risk_check: "Risk check",
   photo_triage: "Photo triage",
   qa: "Tenant Q&A",
+  voice_transcribe: "Voice transcription",
 };
 
 const QA_OUTCOME_LABELS: Record<string, string> = {

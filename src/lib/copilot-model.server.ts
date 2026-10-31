@@ -238,3 +238,98 @@ export async function callSegmentation(
 
   return { ...parseSegmentationText(rawText), rawText, modelId };
 }
+
+/* ---------- Voice transcription ---------- */
+
+/** The configured voice transcription model ID, or null when unset. Used for audit rows. */
+export function configuredVoiceModelId(): string | null {
+  return readEnv("META_VOICE_MODEL_ID");
+}
+
+/** Names of the settings voice transcription needs that are not set. */
+export function missingVoiceConfig(): string[] {
+  return ["META_MODEL_API_KEY", "META_MODEL_API_BASE_URL", "META_VOICE_MODEL_ID"].filter((name) => !readEnv(name));
+}
+
+/** The /asr/transcribe endpoint on the same base URL the chat adapter uses. */
+export function asrTranscribeUrl(baseUrl: string): string {
+  const trimmed = baseUrl
+    .replace(/\/+$/, "")
+    .replace(/\/chat\/completions$/, "")
+    .replace(/\/responses$/, "");
+  return trimmed.endsWith("/asr/transcribe") ? trimmed : `${trimmed}/asr/transcribe`;
+}
+
+export type TranscriptionResult = {
+  /** The model's transcript exactly as returned — never trimmed or edited. */
+  transcript: string;
+  modelId: string;
+  audioDurationMs: number | null;
+  sessionId: string | null;
+};
+
+/**
+ * One transcription request for one complete WAV recording (mono 16-bit PCM at 16 or
+ * 24 kHz): multipart POST {base}/asr/transcribe with a JSON `request` part and the
+ * `audio` part, buffered JSON reply. An empty transcript is returned as "" (no speech),
+ * not thrown; HTTP errors, missing settings and unreadable replies throw ModelCallError.
+ */
+export async function callTranscription(
+  audio: Blob,
+  options: { timeoutMs?: number } = {},
+): Promise<TranscriptionResult> {
+  const apiKey = readEnv("META_MODEL_API_KEY");
+  const baseUrl = readEnv("META_MODEL_API_BASE_URL");
+  const modelId = readEnv("META_VOICE_MODEL_ID");
+
+  if (!apiKey || !modelId || !baseUrl) {
+    console.error("[copilot] transcription not configured; missing:", missingVoiceConfig().join(", "));
+    throw new ModelCallError("Transcription model is not configured", modelId, "not_configured");
+  }
+
+  const form = new FormData();
+  form.append(
+    "request",
+    new Blob([JSON.stringify({ model: modelId, audioEncoding: "WAV", mode: "PUSH_TO_TALK" })], {
+      type: "application/json",
+    }),
+  );
+  form.append("audio", new Blob([audio], { type: "audio/wav" }), "voice-note.wav");
+
+  let response: Response;
+  try {
+    response = await fetch(asrTranscribeUrl(baseUrl), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      body: form,
+      signal: AbortSignal.timeout(options.timeoutMs ?? 180_000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    console.error("[copilot] transcription request failed", timedOut ? "timeout" : error);
+    throw new ModelCallError("Transcription request failed", modelId, timedOut ? "timeout" : "network");
+  }
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("[copilot] transcription API error", response.status, detail.slice(0, 500));
+    throw new ModelCallError(`Transcription API returned ${response.status}`, modelId, `http_${response.status}`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new ModelCallError("Transcription API returned invalid JSON", modelId, "invalid_response");
+  }
+  const b = body as { transcript?: unknown; audioDurationMs?: unknown; sessionId?: unknown } | null;
+  if (!b || typeof b.transcript !== "string") {
+    throw new ModelCallError("Transcription reply had no transcript", modelId, "invalid_response");
+  }
+  return {
+    transcript: b.transcript,
+    modelId,
+    audioDurationMs: typeof b.audioDurationMs === "number" ? b.audioDurationMs : null,
+    sessionId: typeof b.sessionId === "string" ? b.sessionId : null,
+  };
+}
