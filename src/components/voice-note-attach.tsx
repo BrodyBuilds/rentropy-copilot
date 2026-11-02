@@ -3,6 +3,7 @@ import { AudioLines, Mic } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { VoiceNoteRecorder } from "@/components/voice-note-recorder";
 import { supabase } from "@/integrations/supabase/client";
 import {
   encodeWavMono16,
@@ -152,21 +153,31 @@ export function VoiceNoteAttach({
     }
   }
 
+  // A finished in-browser recording becomes the attached file; everything after is the upload path.
+  function attachRecording(recorded: File) {
+    setError(null);
+    setNotice(null);
+    setFile(recorded);
+  }
+
   return (
     <div>
       <p className="console-label">Tenant voice note (optional)</p>
-      <label className="mt-2 flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-input bg-background px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-secondary">
-        <Mic className="h-5 w-5" />
-        <span className="text-foreground">{file ? file.name : "Attach tenant voice note"}</span>
-        <input
-          type="file"
-          accept={VOICE_ACCEPT}
-          className="sr-only"
-          aria-label="Tenant voice note"
-          disabled={disabled || busy}
-          onChange={(e) => pick(e.target.files?.[0] ?? null)}
-        />
-      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md border border-dashed border-input bg-background px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/60 hover:bg-secondary">
+          <Mic className="h-5 w-5" />
+          <span className="truncate text-foreground">{file ? file.name : "Attach tenant voice note"}</span>
+          <input
+            type="file"
+            accept={VOICE_ACCEPT}
+            className="sr-only"
+            aria-label="Tenant voice note"
+            disabled={disabled || busy}
+            onChange={(e) => pick(e.target.files?.[0] ?? null)}
+          />
+        </label>
+        <VoiceNoteRecorder disabled={disabled || busy} onUse={attachRecording} />
+      </div>
       <p className="mt-1 text-xs text-muted-foreground">MP3, M4A, or WAV, up to 10 minutes.</p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button size="sm" variant="outline" onClick={run} disabled={disabled || busy || !file || !tenantId}>
