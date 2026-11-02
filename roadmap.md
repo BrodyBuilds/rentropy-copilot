@@ -12,3 +12,4 @@
 - [x] Compose flow: English / Spanish draft language (prompt + audit detail, "Draft — Spanish" label)
 - [x] Audit log: expandable entries with full stored record, both triage models, linked draft details
 - [x] Photo triage: tenant voice note attach + transcription into the note (tenant-voice-notes bucket, voice_transcribe audit action)
+- [x] Photo triage: "Record voice note" in the browser, feeding the same attach path
